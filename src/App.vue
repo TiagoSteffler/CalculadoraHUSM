@@ -59,9 +59,6 @@ const medicationLabel = (medication) =>
 const canManage = computed(() => authRole.value === 'admin')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
 
-const dataSourceStatus =
-  'Modo provisório: medicamentos e cadastros salvos localmente (mock + localStorage).'
-
 const allMedications = computed(() => [
   ...baseMedications,
   ...customMedications.value
@@ -506,7 +503,6 @@ loadCustomMedications()
           Ferramenta de apoio para regra de três de medicamentos com variações de
           diluição, cálculo padrão e cálculo por peso.
         </p>
-        <p class="source-note">{{ dataSourceStatus }}</p>
       </div>
       <div v-if="isAuthenticated" class="header-actions">
         <span class="badge">Logado como {{ authUser }} ({{ roleLabel }})</span>
@@ -755,7 +751,6 @@ loadCustomMedications()
           <p class="muted">
             Área administrativa para adicionar novos medicamentos à base local da aplicação.
           </p>
-          <p class="provisional-note">{{ dataSourceStatus }}</p>
 
           <form class="admin-form" @submit.prevent="addMedication">
             <label class="field-group">
