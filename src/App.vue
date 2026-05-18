@@ -1,24 +1,27 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { medications as baseMedications } from './data/medications'
+import { api } from './services/api'
 
 const AUTH_KEY = 'husm-auth'
 const RECENT_KEY = 'husm-recent-searches'
-const CUSTOM_MEDICATIONS_KEY = 'husm-custom-medications'
 const DEFAULT_IMAGE = '/images/ampola.svg'
 
 const loginUser = ref('')
 const loginPassword = ref('')
 const loginError = ref('')
+const loginLoading = ref(false)
 const authUser = ref('')
 const authRole = ref('')
+const authToken = ref('')
 const isAuthenticated = ref(false)
 const activeView = ref('calculator')
 
 const searchTerm = ref('')
 const selectedMedication = ref(null)
 const recentSearches = ref([])
-const customMedications = ref([])
+const medications = ref([])
+const medicationsLoading = ref(false)
+const medicationsError = ref('')
 
 const calculateByWeight = ref(false)
 const prescribedMg = ref('')
@@ -29,6 +32,7 @@ const calcError = ref('')
 
 const adminError = ref('')
 const adminSuccess = ref('')
+const adminLoading = ref(false)
 const editingMedicationId = ref('')
 const newMedication = reactive({
   name: '',
@@ -54,24 +58,19 @@ const slugify = (value) =>
     .slice(0, 60) || 'medicamento'
 
 const medicationLabel = (medication) =>
-  `${medication.name} - ${medication.variation}`
+  `${medication.name} ${medication.variation}`
 
-const canManage = computed(() => authRole.value === 'admin')
+const canManage = computed(() => authRole.value === 'ADMIN')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
-
-const allMedications = computed(() => [
-  ...baseMedications,
-  ...customMedications.value
-])
 
 const filteredMedications = computed(() => {
   const query = normalizeText(searchTerm.value.trim())
 
   if (!query) {
-    return allMedications.value
+    return medications.value
   }
 
-  return allMedications.value.filter((medication) => {
+  return medications.value.filter((medication) => {
     const searchableText = normalizeText(
       [
         medication.name,
@@ -86,7 +85,7 @@ const filteredMedications = computed(() => {
 })
 
 const roleLabel = computed(() =>
-  authRole.value === 'admin' ? 'Administrador' : 'Profissional'
+  authRole.value === 'ADMIN' ? 'Administrador' : 'Profissional'
 )
 
 const loadRecentSearches = () => {
@@ -105,35 +104,18 @@ const loadRecentSearches = () => {
   }
 }
 
-const loadCustomMedications = () => {
-  const rawCustom = localStorage.getItem(CUSTOM_MEDICATIONS_KEY)
-
-  if (!rawCustom) {
-    customMedications.value = []
-    return
-  }
-
+const loadMedications = async () => {
   try {
-    const parsed = JSON.parse(rawCustom)
-
-    if (!Array.isArray(parsed)) {
-      customMedications.value = []
-      return
-    }
-
-    customMedications.value = parsed.filter((medication) => {
-      const hasValidCoreFields =
-        medication &&
-        typeof medication.id === 'string' &&
-        typeof medication.name === 'string' &&
-        typeof medication.variation === 'string' &&
-        Number(medication.volumeMl) > 0 &&
-        Number(medication.amountMg) > 0
-
-      return hasValidCoreFields
-    })
-  } catch {
-    customMedications.value = []
+    medicationsLoading.value = true
+    medicationsError.value = ''
+    const response = await api.getMedications()
+    medications.value = Array.isArray(response) ? response : []
+  } catch (error) {
+    medicationsError.value = 'Erro ao carregar medicamentos. Tente recarregar a página.'
+    console.error('Erro ao carregar medicamentos:', error)
+    medications.value = []
+  } finally {
+    medicationsLoading.value = false
   }
 }
 
@@ -144,29 +126,34 @@ const loadSession = () => {
     isAuthenticated.value = false
     authUser.value = ''
     authRole.value = ''
+    authToken.value = ''
     return
   }
 
   try {
     const session = JSON.parse(rawAuth)
-    const isRoleValid = session?.role === 'admin' || session?.role === 'user'
+    const isRoleValid = session?.role === 'ADMIN' || session?.role === 'USER'
 
-    if (!isRoleValid) {
+    if (!isRoleValid || !session?.token) {
       sessionStorage.removeItem(AUTH_KEY)
       isAuthenticated.value = false
       authUser.value = ''
       authRole.value = ''
+      authToken.value = ''
       return
     }
 
     isAuthenticated.value = true
     authUser.value = session.username
     authRole.value = session.role
+    authToken.value = session.token
+    api.setToken(session.token)
   } catch {
     sessionStorage.removeItem(AUTH_KEY)
     isAuthenticated.value = false
     authUser.value = ''
     authRole.value = ''
+    authToken.value = ''
   }
 }
 
@@ -188,12 +175,7 @@ const saveRecentSearch = (term) => {
   localStorage.setItem(RECENT_KEY, JSON.stringify(deduplicated))
 }
 
-const saveCustomMedications = () => {
-  localStorage.setItem(
-    CUSTOM_MEDICATIONS_KEY,
-    JSON.stringify(customMedications.value)
-  )
-}
+
 
 const clearCalculator = () => {
   prescribedMg.value = ''
@@ -250,38 +232,58 @@ const selectMedication = (medication) => {
   clearCalculator()
 }
 
-const handleLogin = () => {
+const handleLogin = async () => {
   const username = loginUser.value.trim().toLowerCase()
-  const password = loginPassword.value
+  const senha = loginPassword.value
 
-  if ((username === 'admin' || username === 'user') && password === 'senha') {
-    const role = username
+  if (!username || !senha) {
+    loginError.value = 'Informe usuário e senha.'
+    return
+  }
+
+  try {
+    loginLoading.value = true
+    loginError.value = ''
+    
+    const response = await api.login(username, senha)
+    
+    const role = response.role || response.role?.toUpperCase()
+    
     sessionStorage.setItem(
       AUTH_KEY,
       JSON.stringify({
         username,
-        role
+        role,
+        token: response.token
       })
     )
 
     authUser.value = username
     authRole.value = role
+    authToken.value = response.token
     isAuthenticated.value = true
     activeView.value = 'calculator'
-    loginError.value = ''
     loginPassword.value = ''
-    return
+    
+    await loadMedications()
+  } catch (error) {
+    if (error.message == "HTTP 401") {
+      loginError.value = 'Falha ao fazer login. Verifique suas credenciais.';
+    } else {
+      loginError.value = error.message; 
+    }
+  } finally {
+    loginLoading.value = false
   }
-
-  loginError.value =
-    'Credenciais inválidas. Use admin/senha para acesso total ou user/senha para acesso à calculadora.'
 }
 
 const handleLogout = () => {
   sessionStorage.removeItem(AUTH_KEY)
+  api.setToken(null)
   isAuthenticated.value = false
   authUser.value = ''
   authRole.value = ''
+  authToken.value = ''
   selectedMedication.value = null
   searchTerm.value = ''
   activeView.value = 'calculator'
@@ -292,7 +294,7 @@ const handleLogout = () => {
 const useRecentSearch = (term) => {
   searchTerm.value = term
 
-  const exactMatch = allMedications.value.find(
+  const exactMatch = medications.value.find(
     (medication) => normalizeText(medicationLabel(medication)) === normalizeText(term)
   )
 
@@ -374,7 +376,7 @@ const calculateDose = () => {
   calcError.value = ''
 }
 
-const addMedication = () => {
+const addMedication = async () => {
   adminError.value = ''
   adminSuccess.value = ''
 
@@ -415,10 +417,7 @@ const addMedication = () => {
     return
   }
 
-  const newEntry = {
-    id:
-      editingMedicationId.value ||
-      `${slugify(`${name}-${variation}`)}-${Date.now().toString(36)}`,
+  const medicationData = {
     name,
     variation,
     volumeMl,
@@ -429,51 +428,59 @@ const addMedication = () => {
     image
   }
 
-  if (isEditingMedication.value) {
-    const medicationExists = customMedications.value.some(
-      (medication) => medication.id === editingMedicationId.value
-    )
+  try {
+    adminLoading.value = true
+    let newEntry
 
-    if (!medicationExists) {
-      adminError.value =
-        'Não foi possível atualizar: o medicamento selecionado não foi encontrado.'
-      return
+    if (isEditingMedication.value) {
+      await api.updateMedication(editingMedicationId.value, medicationData)
+      newEntry = { id: editingMedicationId.value, ...medicationData }
+    } else {
+      const id = `${slugify(`${name}-${variation}`)}-${Date.now().toString(36)}`
+      await api.createMedication({ id, ...medicationData })
+      newEntry = { id, ...medicationData }
     }
 
-    customMedications.value = customMedications.value.map((medication) =>
-      medication.id === editingMedicationId.value ? newEntry : medication
-    )
-  } else {
-    customMedications.value = [newEntry, ...customMedications.value]
+    selectMedication(newEntry)
+    resetNewMedication()
+    adminSuccess.value = isEditingMedication.value
+      ? 'Medicamento atualizado com sucesso.'
+      : 'Medicamento cadastrado com sucesso.'
+    editingMedicationId.value = ''
+    
+    await loadMedications()
+  } catch (error) {
+    adminError.value = error.message || 'Erro ao salvar medicamento. Tente novamente.'
+  } finally {
+    adminLoading.value = false
   }
-
-  saveCustomMedications()
-  selectMedication(newEntry)
-  resetNewMedication()
-  adminSuccess.value = isEditingMedication.value
-    ? 'Medicamento atualizado com sucesso. As alterações já estão disponíveis na calculadora.'
-    : 'Medicamento cadastrado com sucesso. Ele já está disponível na calculadora.'
-  editingMedicationId.value = ''
 }
 
-const removeCustomMedication = (id) => {
-  customMedications.value = customMedications.value.filter(
-    (medication) => medication.id !== id
-  )
-  saveCustomMedications()
+const removeCustomMedication = async (id) => {
+  try {
+    adminError.value = ''
+    adminSuccess.value = ''
+    adminLoading.value = true
+    
+    await api.deleteMedication(id)
 
-  if (selectedMedication.value?.id === id) {
-    selectedMedication.value = null
-    searchTerm.value = ''
-    clearCalculator()
+    if (selectedMedication.value?.id === id) {
+      selectedMedication.value = null
+      searchTerm.value = ''
+      clearCalculator()
+    }
+
+    if (editingMedicationId.value === id) {
+      cancelMedicationEdition()
+    }
+
+    adminSuccess.value = 'Medicamento removido com sucesso.'
+    await loadMedications()
+  } catch (error) {
+    adminError.value = error.message || 'Erro ao remover medicamento.'
+  } finally {
+    adminLoading.value = false
   }
-
-  if (editingMedicationId.value === id) {
-    cancelMedicationEdition()
-  }
-
-  adminSuccess.value = 'Medicamento removido com sucesso.'
-  adminError.value = ''
 }
 
 watch(calculateByWeight, () => {
@@ -490,7 +497,7 @@ watch(authRole, (role) => {
 
 loadSession()
 loadRecentSearches()
-loadCustomMedications()
+loadMedications()
 </script>
 
 <template>
@@ -542,7 +549,9 @@ loadCustomMedications()
             />
           </label>
 
-          <button type="submit" class="btn-primary">Entrar</button>
+          <button type="submit" class="btn-primary" :disabled="loginLoading">
+            {{ loginLoading ? 'Entrando...' : 'Entrar' }}
+          </button>
         </form>
 
         <p class="hint">Acessos: admin/senha (total) e user/senha (somente calculadora)</p>
@@ -577,6 +586,9 @@ loadCustomMedications()
             Digite nome, variação ou indicação. Pressione Enter para selecionar o
             primeiro resultado.
           </p>
+
+          <p v-if="medicationsError" class="error-msg">{{ medicationsError }}</p>
+          <p v-if="medicationsLoading" class="muted">Carregando medicamentos...</p>
 
           <div class="search-box">
             <input
@@ -839,13 +851,14 @@ loadCustomMedications()
             </label>
 
             <div class="admin-actions">
-              <button type="submit" class="btn-primary">
-                {{ isEditingMedication ? 'Salvar alterações' : 'Adicionar medicamento' }}
+              <button type="submit" class="btn-primary" :disabled="adminLoading">
+                {{ adminLoading ? 'Salvando...' : isEditingMedication ? 'Salvar alterações' : 'Adicionar medicamento' }}
               </button>
               <button
                 v-if="isEditingMedication"
                 type="button"
                 class="btn-secondary"
+                :disabled="adminLoading"
                 @click="cancelMedicationEdition"
               >
                 Cancelar edição
@@ -859,11 +872,11 @@ loadCustomMedications()
 
         <article class="card admin-list-card">
           <h2>Medicamentos adicionados</h2>
-          <p class="muted">Total de cadastros locais: {{ customMedications.length }}</p>
+          <p class="muted">Total de cadastros: {{ medications.length }}</p>
 
-          <ul v-if="customMedications.length > 0" class="admin-med-list">
+          <ul v-if="medications.length > 0" class="admin-med-list">
             <li
-              v-for="medication in customMedications"
+              v-for="medication in medications"
               :key="medication.id"
               class="admin-med-item"
               :class="{ editing: editingMedicationId === medication.id }"
@@ -883,6 +896,7 @@ loadCustomMedications()
                 <button
                   type="button"
                   class="btn-secondary compact"
+                  :disabled="adminLoading"
                   @click="startMedicationEdition(medication)"
                 >
                   Editar
@@ -890,6 +904,7 @@ loadCustomMedications()
                 <button
                   type="button"
                   class="btn-danger compact"
+                  :disabled="adminLoading"
                   @click="removeCustomMedication(medication.id)"
                 >
                   Remover
@@ -897,7 +912,7 @@ loadCustomMedications()
               </div>
             </li>
           </ul>
-          <p v-else class="empty-text">Nenhum medicamento cadastrado pelo administrador.</p>
+          <p v-else class="empty-text">Nenhum medicamento cadastrado.</p>
         </article>
       </section>
     </section>
