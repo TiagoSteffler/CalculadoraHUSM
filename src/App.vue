@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { api } from './services/api'
 
 const AUTH_KEY = 'husm-auth'
@@ -18,6 +18,7 @@ const activeView = ref('calculator')
 
 const searchTerm = ref('')
 const selectedMedication = ref(null)
+const detailPanelRef = ref(null)
 const recentSearches = ref([])
 const medications = ref([])
 const medicationsLoading = ref(false)
@@ -225,11 +226,31 @@ const startMedicationEdition = (medication) => {
   adminSuccess.value = 'Modo de edição ativado para o medicamento selecionado.'
 }
 
+const scrollToMedicationDetails = async () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const shouldScroll = window.matchMedia?.('(max-width: 1024px)').matches
+
+  if (!shouldScroll) {
+    return
+  }
+
+  await nextTick()
+  detailPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const clearSearch = () => {
+  searchTerm.value = ''
+}
+
 const selectMedication = (medication) => {
   selectedMedication.value = medication
   searchTerm.value = medicationLabel(medication)
   saveRecentSearch(medicationLabel(medication))
   clearCalculator()
+  void scrollToMedicationDetails()
 }
 
 const handleLogin = async () => {
@@ -503,19 +524,53 @@ loadMedications()
 <template>
   <main class="app-shell">
     <header class="card hero">
-      <div>
+      <div class="hero-title">
         <p class="eyebrow">Hospital Universitário de Santa Maria</p>
         <h1>Calculadora de Dosagem HUSM</h1>
-        <p class="hero-text">
+        <!--<p class="hero-text">
           Ferramenta de apoio para regra de três de medicamentos com variações de
           diluição, cálculo padrão e cálculo por peso.
-        </p>
+        </p>-->
       </div>
-      <div v-if="isAuthenticated" class="header-actions">
-        <span class="badge">Logado como {{ authUser }} ({{ roleLabel }})</span>
-        <button type="button" class="btn-secondary" @click="handleLogout">
-          Sair
-        </button>
+      <div v-if="isAuthenticated" class="hero-controls">
+        <div class="header-actions">
+          <span class="badge">Logado como {{ authUser }} ({{ roleLabel }})</span>
+        </div>
+
+        <div class="header-nav">
+          <button
+            type="button"
+            class="tab-btn"
+            :class="{ active: activeView === 'calculator' }"
+            aria-label="Calculadora"
+            @click="activeView = 'calculator'"
+          >
+            <span class="tab-icon" aria-hidden="true">🧮</span>
+            <span class="tab-text">Calculadora</span>
+          </button>
+
+          <button
+            v-if="canManage"
+            type="button"
+            class="tab-btn"
+            :class="{ active: activeView === 'admin' }"
+            aria-label="Administração"
+            @click="activeView = 'admin'"
+          >
+            <span class="tab-icon" aria-hidden="true">⚙️</span>
+            <span class="tab-text">Administração</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-secondary logout-btn"
+            aria-label="Sair"
+            @click="handleLogout"
+          >
+            <span class="tab-icon" aria-hidden="true">➜]</span>
+            <span class="tab-text">Sair</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -554,31 +609,11 @@ loadMedications()
           </button>
         </form>
 
-        <p class="hint">Acessos: admin/senha (total) e user/senha (somente calculadora)</p>
         <p v-if="loginError" class="error-msg">{{ loginError }}</p>
       </article>
     </section>
 
     <section v-else class="dashboard-shell">
-      <article v-if="canManage" class="card role-tabs">
-        <button
-          type="button"
-          class="tab-btn"
-          :class="{ active: activeView === 'calculator' }"
-          @click="activeView = 'calculator'"
-        >
-          Calculadora
-        </button>
-        <button
-          type="button"
-          class="tab-btn"
-          :class="{ active: activeView === 'admin' }"
-          @click="activeView = 'admin'"
-        >
-          Administração
-        </button>
-      </article>
-
       <section v-if="activeView === 'calculator' || !canManage" class="dashboard-grid">
         <article class="card search-panel">
           <h2>Pesquisar medicamento</h2>
@@ -593,11 +628,20 @@ loadMedications()
           <div class="search-box">
             <input
               v-model="searchTerm"
-              class="input"
+              class="input search-input"
               type="text"
               placeholder="Ex.: dipirona, morfina, ceftriaxona"
               @keyup.enter="commitSearch"
             />
+            <button
+              v-if="searchTerm"
+              type="button"
+              class="clear-btn"
+              aria-label="Limpar busca"
+              @click="clearSearch"
+            >
+              ×
+            </button>
           </div>
 
           <ul v-if="filteredMedications.length > 0" class="result-list">
@@ -644,33 +688,36 @@ loadMedications()
           </div>
         </article>
 
-        <article class="card detail-panel">
-          <div v-if="selectedMedication">
-            <div class="med-head">
-              <img
-                class="ampoule-image"
-                :src="selectedMedication.image"
-                :alt="`Ampola de ${selectedMedication.name}`"
-              />
-              <div>
-                <h2>{{ selectedMedication.name }}</h2>
-                <p class="med-variation">{{ selectedMedication.variation }}</p>
+        <article ref="detailPanelRef" class="card detail-panel">
+          <div v-if="selectedMedication" class="detail-layout">
+            <div class="detail-info">
+              <div class="med-head">
+                <img
+                  class="ampoule-image"
+                  :src="selectedMedication.image"
+                  :alt="`Ampola de ${selectedMedication.name}`"
+                />
+                <div>
+                  <h2>{{ selectedMedication.name }}</h2>
+                  <p class="med-variation">{{ selectedMedication.variation }}</p>
+                </div>
               </div>
+
+              <p class="med-description">{{ selectedMedication.description }}</p>
+
+              <p class="subtitle">Indicações comuns</p>
+              <ul class="indication-list">
+                <li
+                  v-for="indication in selectedMedication.indications"
+                  :key="indication"
+                >
+                  {{ indication }}
+                </li>
+              </ul>
             </div>
 
-            <p class="med-description">{{ selectedMedication.description }}</p>
-
-            <p class="subtitle">Indicações comuns</p>
-            <ul class="indication-list">
-              <li
-                v-for="indication in selectedMedication.indications"
-                :key="indication"
-              >
-                {{ indication }}
-              </li>
-            </ul>
-
-            <section class="calc-card">
+            <div class="detail-calc">
+              <section class="calc-card">
               <div class="calc-head">
                 <h3>Calculadora</h3>
                 <label class="checkbox-row">
@@ -744,7 +791,8 @@ loadMedications()
               </button>
 
               <p v-if="calcError" class="error-msg">{{ calcError }}</p>
-            </section>
+              </section>
+            </div>
           </div>
 
           <div v-else class="placeholder">
@@ -760,9 +808,9 @@ loadMedications()
       <section v-if="canManage && activeView === 'admin'" class="admin-layout">
         <article class="card admin-form-card">
           <h2>Cadastro de medicamentos</h2>
-          <p class="muted">
+          <!--<p class="muted">
             Área administrativa para adicionar novos medicamentos à base local da aplicação.
-          </p>
+          </p>-->
 
           <form class="admin-form" @submit.prevent="addMedication">
             <label class="field-group">
