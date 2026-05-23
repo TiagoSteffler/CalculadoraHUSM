@@ -24,27 +24,275 @@ const medications = ref([])
 const medicationsLoading = ref(false)
 const medicationsError = ref('')
 
-const calculateByWeight = ref(false)
 const prescribedMg = ref('')
-const mgPerKg = ref('')
-const patientWeight = ref('')
+const dilutionMl = ref('')
 const resultMl = ref('')
+const diluteInMl = ref('')
 const calcError = ref('')
 
 const adminError = ref('')
 const adminSuccess = ref('')
 const adminLoading = ref(false)
+const adminSearchTerm = ref('')
 const editingMedicationId = ref('')
+const adminFormRef = ref(null)
+const imageFileInputRef = ref(null)
+const uploadedImageDataUrl = ref('')
+const uploadedImageLabel = ref('')
+const imageProcessing = ref(false)
 const newMedication = reactive({
   name: '',
   variation: '',
   volumeMl: '',
   amountMg: '',
-  mgPerKgDefault: '',
   description: '',
-  indications: '',
+  classes: '',
+  reconstituition: '',
+  diluition: '',
+  infusionTime: '',
   image: ''
 })
+
+const isDataImageUrl = (value) =>
+  typeof value === 'string' && value.trim().toLowerCase().startsWith('data:image/')
+
+const inferMimeTypeFromBase64 = (base64) => {
+  const head = String(base64 ?? '').slice(0, 10)
+
+  if (head.startsWith('/9j/')) {
+    return 'image/jpeg'
+  }
+
+  if (head.startsWith('iVBORw0KG')) {
+    return 'image/png'
+  }
+
+  if (head.startsWith('R0lGOD')) {
+    return 'image/gif'
+  }
+
+  if (head.startsWith('UklGR')) {
+    return 'image/webp'
+  }
+
+  if (head.startsWith('PHN2Zy')) {
+    return 'image/svg+xml'
+  }
+
+  return 'image/jpeg'
+}
+
+const looksLikeBase64 = (value) => {
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  const cleaned = value.trim().replace(/\s+/g, '')
+
+  if (cleaned.length < 80) {
+    return false
+  }
+
+  return /^[A-Za-z0-9+/_-]+={0,2}$/.test(cleaned)
+}
+
+const normalizeBase64String = (value) => {
+  const cleaned = String(value ?? '').trim().replace(/\s+/g, '')
+  const standard = cleaned.replace(/-/g, '+').replace(/_/g, '/')
+  const remainder = standard.length % 4
+
+  if (remainder === 0) {
+    return standard
+  }
+
+  return `${standard}${'='.repeat(4 - remainder)}`
+}
+
+const resolveImageSrc = (value) => {
+  const raw = String(value ?? '').trim()
+
+  if (!raw) {
+    return DEFAULT_IMAGE
+  }
+
+  if (raw === DEFAULT_IMAGE) {
+    return DEFAULT_IMAGE
+  }
+
+  if (isDataImageUrl(raw)) {
+    return raw
+  }
+
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('/') || raw.startsWith('./')) {
+    return raw
+  }
+
+  if (looksLikeBase64(raw)) {
+    const base64 = normalizeBase64String(raw)
+    const mime = inferMimeTypeFromBase64(base64)
+    return `data:${mime};base64,${base64}`
+  }
+
+  return raw
+}
+
+const isEncodedImageValue = (value) => isDataImageUrl(value) || looksLikeBase64(value)
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'))
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.readAsDataURL(file)
+  })
+
+const resizeImageToHdDataUrl = (dataUrl) =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+
+    image.onload = () => {
+      const maxDimension = 1280
+      const { width, height } = image
+
+      if (!width || !height) {
+        reject(new Error('Imagem inválida.'))
+        return
+      }
+
+      const scale = Math.min(1, maxDimension / Math.max(width, height))
+      const targetWidth = Math.max(1, Math.round(width * scale))
+      const targetHeight = Math.max(1, Math.round(height * scale))
+
+      const canvas = document.createElement('canvas')
+      canvas.width = targetWidth
+      canvas.height = targetHeight
+
+      const context = canvas.getContext('2d')
+
+      if (!context) {
+        reject(new Error('Canvas indisponível.'))
+        return
+      }
+
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, targetWidth, targetHeight)
+      context.drawImage(image, 0, 0, targetWidth, targetHeight)
+
+      const jpegQuality = 0.85
+      resolve(canvas.toDataURL('image/jpeg', jpegQuality))
+    }
+
+    image.onerror = () => reject(new Error('Falha ao carregar imagem.'))
+    image.src = String(dataUrl ?? '')
+  })
+
+const resetImageUpload = () => {
+  uploadedImageDataUrl.value = ''
+  uploadedImageLabel.value = ''
+
+  if (imageFileInputRef.value) {
+    imageFileInputRef.value.value = ''
+  }
+}
+
+const handleImageFileSelected = async (event) => {
+  const input = event?.target
+  const file = input?.files?.[0]
+
+  if (!file) {
+    return
+  }
+
+  if (!file.type?.startsWith('image/')) {
+    adminError.value = 'Selecione um arquivo de imagem válido.'
+    input.value = ''
+    return
+  }
+
+  try {
+    imageProcessing.value = true
+    adminError.value = ''
+
+    const dataUrl = await readFileAsDataUrl(file)
+    const resized = await resizeImageToHdDataUrl(dataUrl)
+
+    uploadedImageDataUrl.value = resized
+    uploadedImageLabel.value = file.name
+  } catch (error) {
+    adminError.value = error?.message || 'Erro ao processar a imagem selecionada.'
+    resetImageUpload()
+  } finally {
+    imageProcessing.value = false
+  }
+}
+
+const removeUploadedImage = () => {
+  resetImageUpload()
+}
+
+const toStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean)
+}
+
+const parseListInput = (value) =>
+  String(value ?? '')
+    .split(/[,;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+const parseMultilineInput = (value) => {
+  const raw = String(value ?? '').trim()
+
+  if (!raw) {
+    return []
+  }
+
+  if (raw.includes('\n')) {
+    return raw
+      .split(/\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const normalizeMedication = (medication) => {
+  if (!medication || typeof medication !== 'object') {
+    return null
+  }
+
+  const normalized = { ...medication }
+
+  normalized.id = String(medication.id ?? '')
+  normalized.name = String(medication.name ?? '')
+  normalized.variation = String(medication.variation ?? '')
+  normalized.volumeMl = Number(medication.volumeMl ?? 0)
+  normalized.amountMg = Number(medication.amountMg ?? 0)
+  normalized.description = String(medication.description ?? '')
+  normalized.image = String(medication.image ?? '').trim() || DEFAULT_IMAGE
+
+  normalized.classes = toStringArray(medication.classes ?? medication.indications)
+  normalized.reconstituition = toStringArray(
+    medication.reconstituition ?? medication.reconstitution
+  )
+  normalized.diluition = toStringArray(medication.diluition ?? medication.dilution)
+  normalized.infusionTime = toStringArray(medication.infusionTime)
+
+  return normalized
+}
 
 const normalizeText = (value) =>
   String(value)
@@ -77,7 +325,28 @@ const filteredMedications = computed(() => {
         medication.name,
         medication.variation,
         medication.description,
-        medication.indications.join(' ')
+        medication.classes.join(' ')
+      ].join(' ')
+    )
+
+    return searchableText.includes(query)
+  })
+})
+
+const adminFilteredMedications = computed(() => {
+  const query = normalizeText(adminSearchTerm.value.trim())
+
+  if (!query) {
+    return medications.value
+  }
+
+  return medications.value.filter((medication) => {
+    const searchableText = normalizeText(
+      [
+        medication.name,
+        medication.variation,
+        medication.description,
+        medication.classes.join(' ')
       ].join(' ')
     )
 
@@ -110,7 +379,9 @@ const loadMedications = async () => {
     medicationsLoading.value = true
     medicationsError.value = ''
     const response = await api.getMedications()
-    medications.value = Array.isArray(response) ? response : []
+    medications.value = Array.isArray(response)
+      ? response.map(normalizeMedication).filter(Boolean)
+      : []
   } catch (error) {
     medicationsError.value = 'Erro ao carregar medicamentos. Tente recarregar a página.'
     console.error('Erro ao carregar medicamentos:', error)
@@ -180,11 +451,9 @@ const saveRecentSearch = (term) => {
 
 const clearCalculator = () => {
   prescribedMg.value = ''
-  mgPerKg.value = selectedMedication.value?.mgPerKgDefault
-    ? String(selectedMedication.value.mgPerKgDefault)
-    : ''
-  patientWeight.value = ''
+  dilutionMl.value = ''
   resultMl.value = ''
+  diluteInMl.value = ''
   calcError.value = ''
 }
 
@@ -193,10 +462,13 @@ const resetNewMedication = () => {
   newMedication.variation = ''
   newMedication.volumeMl = ''
   newMedication.amountMg = ''
-  newMedication.mgPerKgDefault = ''
   newMedication.description = ''
-  newMedication.indications = ''
+  newMedication.classes = ''
+  newMedication.reconstituition = ''
+  newMedication.diluition = ''
+  newMedication.infusionTime = ''
   newMedication.image = ''
+  resetImageUpload()
 }
 
 const populateMedicationForm = (medication) => {
@@ -204,12 +476,27 @@ const populateMedicationForm = (medication) => {
   newMedication.variation = medication.variation
   newMedication.volumeMl = String(medication.volumeMl)
   newMedication.amountMg = String(medication.amountMg)
-  newMedication.mgPerKgDefault = medication.mgPerKgDefault
-    ? String(medication.mgPerKgDefault)
-    : ''
   newMedication.description = medication.description
-  newMedication.indications = medication.indications.join(', ')
-  newMedication.image = medication.image === DEFAULT_IMAGE ? '' : medication.image
+  newMedication.classes = medication.classes.join(', ')
+  newMedication.reconstituition = medication.reconstituition.join('\n')
+  newMedication.diluition = medication.diluition.join('\n')
+  newMedication.infusionTime = medication.infusionTime.join('\n')
+
+  const rawImage = String(medication.image ?? '').trim()
+  const cleanedImage = rawImage === DEFAULT_IMAGE ? '' : rawImage
+
+  if (cleanedImage && isEncodedImageValue(cleanedImage)) {
+    uploadedImageDataUrl.value = resolveImageSrc(cleanedImage)
+    uploadedImageLabel.value = 'Imagem salva no banco de dados'
+    newMedication.image = ''
+
+    if (imageFileInputRef.value) {
+      imageFileInputRef.value.value = ''
+    }
+  } else {
+    resetImageUpload()
+    newMedication.image = cleanedImage
+  }
 }
 
 const cancelMedicationEdition = () => {
@@ -224,6 +511,26 @@ const startMedicationEdition = (medication) => {
   populateMedicationForm(medication)
   adminError.value = ''
   adminSuccess.value = 'Modo de edição ativado para o medicamento selecionado.'
+}
+
+const scrollToAdminForm = async () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const shouldScroll = window.matchMedia?.('(max-width: 1024px)').matches
+
+  if (!shouldScroll) {
+    return
+  }
+
+  await nextTick()
+  adminFormRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const editMedicationFromAdminSearch = (medication) => {
+  startMedicationEdition(medication)
+  void scrollToAdminForm()
 }
 
 const scrollToMedicationDetails = async () => {
@@ -245,12 +552,28 @@ const clearSearch = () => {
   searchTerm.value = ''
 }
 
+const clearAdminSearch = () => {
+  adminSearchTerm.value = ''
+}
+
 const selectMedication = (medication) => {
   selectedMedication.value = medication
   searchTerm.value = medicationLabel(medication)
   saveRecentSearch(medicationLabel(medication))
   clearCalculator()
   void scrollToMedicationDetails()
+}
+
+const commitAdminSearch = () => {
+  const cleaned = adminSearchTerm.value.trim()
+
+  if (!cleaned) {
+    return
+  }
+
+  if (adminFilteredMedications.value.length > 0) {
+    editMedicationFromAdminSearch(adminFilteredMedications.value[0])
+  }
 }
 
 const handleLogin = async () => {
@@ -267,8 +590,8 @@ const handleLogin = async () => {
     loginError.value = ''
     
     const response = await api.login(username, senha)
-    
-    const role = response.role || response.role?.toUpperCase()
+
+    const role = String(response.role ?? '').toUpperCase()
     
     sessionStorage.setItem(
       AUTH_KEY,
@@ -353,6 +676,7 @@ const calculateDose = () => {
   if (!selectedMedication.value) {
     calcError.value = 'Selecione um medicamento antes de calcular.'
     resultMl.value = ''
+    diluteInMl.value = ''
     return
   }
 
@@ -362,44 +686,44 @@ const calculateDose = () => {
   if (ampouleVolume <= 0 || ampouleAmount <= 0) {
     calcError.value = 'Dados da ampola inválidos para cálculo.'
     resultMl.value = ''
+    diluteInMl.value = ''
     return
   }
 
-  let targetMg = 0
+  const prescribedValue = Number(prescribedMg.value)
+  const dilutionValue = Number(dilutionMl.value)
 
-  if (calculateByWeight.value) {
-    const dosePerKg = Number(mgPerKg.value)
-    const weightKg = Number(patientWeight.value)
-
-    if (dosePerKg <= 0 || weightKg <= 0) {
-      calcError.value =
-        'Informe dose por kg e peso do paciente com valores maiores que zero.'
-      resultMl.value = ''
-      return
-    }
-
-    targetMg = dosePerKg * weightKg
-  } else {
-    const prescribedValue = Number(prescribedMg.value)
-
-    if (prescribedValue <= 0) {
-      calcError.value =
-        'Informe a quantidade prescrita em mg com valor maior que zero.'
-      resultMl.value = ''
-      return
-    }
-
-    targetMg = prescribedValue
+  if (prescribedValue <= 0) {
+    calcError.value =
+      'Informe a quantidade prescrita em mg com valor maior que zero.'
+    resultMl.value = ''
+    diluteInMl.value = ''
+    return
   }
 
-  const volumeNeeded = (targetMg * ampouleVolume) / ampouleAmount
+  if (dilutionValue <= 0) {
+    calcError.value = 'Informe a diluição (mL) com valor maior que zero.'
+    resultMl.value = ''
+    diluteInMl.value = ''
+    return
+  }
+
+  const volumeNeeded = (prescribedValue * ampouleVolume) / ampouleAmount
   resultMl.value = `${volumeNeeded.toFixed(2)} mL`
+
+  const diluentNeeded = (dilutionValue * prescribedValue) / ampouleAmount
+  diluteInMl.value = `${diluentNeeded.toFixed(2)} mL`
   calcError.value = ''
 }
 
 const addMedication = async () => {
   adminError.value = ''
   adminSuccess.value = ''
+
+  if (imageProcessing.value) {
+    adminError.value = 'Aguarde o processamento da imagem antes de salvar.'
+    return
+  }
 
   if (!canManage.value) {
     adminError.value = 'Apenas o perfil admin pode cadastrar medicamentos.'
@@ -409,14 +733,13 @@ const addMedication = async () => {
   const name = newMedication.name.trim()
   const variation = newMedication.variation.trim()
   const description = newMedication.description.trim()
-  const image = newMedication.image.trim() || DEFAULT_IMAGE
+  const image = uploadedImageDataUrl.value || newMedication.image.trim() || DEFAULT_IMAGE
   const volumeMl = Number(newMedication.volumeMl)
   const amountMg = Number(newMedication.amountMg)
-  const mgPerKgDefault = Number(newMedication.mgPerKgDefault)
-  const indications = newMedication.indications
-    .split(/[,;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+  const classes = parseListInput(newMedication.classes)
+  const reconstituition = parseMultilineInput(newMedication.reconstituition)
+  const diluition = parseMultilineInput(newMedication.diluition)
+  const infusionTime = parseMultilineInput(newMedication.infusionTime)
 
   if (!name || !variation) {
     adminError.value = 'Informe nome e variação do medicamento.'
@@ -433,8 +756,8 @@ const addMedication = async () => {
     return
   }
 
-  if (indications.length === 0) {
-    adminError.value = 'Informe ao menos uma indicação clínica.'
+  if (classes.length === 0) {
+    adminError.value = 'Informe ao menos uma classe.'
     return
   }
 
@@ -443,9 +766,11 @@ const addMedication = async () => {
     variation,
     volumeMl,
     amountMg,
-    mgPerKgDefault: mgPerKgDefault > 0 ? mgPerKgDefault : 0,
     description,
-    indications,
+    classes,
+    reconstituition,
+    diluition,
+    infusionTime,
     image
   }
 
@@ -455,11 +780,14 @@ const addMedication = async () => {
 
     if (isEditingMedication.value) {
       await api.updateMedication(editingMedicationId.value, medicationData)
-      newEntry = { id: editingMedicationId.value, ...medicationData }
+      newEntry = normalizeMedication({
+        id: editingMedicationId.value,
+        ...medicationData
+      })
     } else {
       const id = `${slugify(`${name}-${variation}`)}-${Date.now().toString(36)}`
       await api.createMedication({ id, ...medicationData })
-      newEntry = { id, ...medicationData }
+      newEntry = normalizeMedication({ id, ...medicationData })
     }
 
     selectMedication(newEntry)
@@ -504,13 +832,14 @@ const removeCustomMedication = async (id) => {
   }
 }
 
-watch(calculateByWeight, () => {
+watch([prescribedMg, dilutionMl], () => {
   resultMl.value = ''
+  diluteInMl.value = ''
   calcError.value = ''
 })
 
 watch(authRole, (role) => {
-  if (role !== 'admin') {
+  if (role !== 'ADMIN') {
     activeView.value = 'calculator'
     cancelMedicationEdition()
   }
@@ -618,7 +947,7 @@ loadMedications()
         <article class="card search-panel">
           <h2>Pesquisar medicamento</h2>
           <p class="muted">
-            Digite nome, variação ou indicação. Pressione Enter para selecionar o
+            Digite nome, apresentação ou classe. Pressione Enter para selecionar o
             primeiro resultado.
           </p>
 
@@ -694,7 +1023,7 @@ loadMedications()
               <div class="med-head">
                 <img
                   class="ampoule-image"
-                  :src="selectedMedication.image"
+                  :src="resolveImageSrc(selectedMedication.image)"
                   :alt="`Ampola de ${selectedMedication.name}`"
                 />
                 <div>
@@ -705,25 +1034,52 @@ loadMedications()
 
               <p class="med-description">{{ selectedMedication.description }}</p>
 
-              <p class="subtitle">Indicações comuns</p>
-              <ul class="indication-list">
-                <li
-                  v-for="indication in selectedMedication.indications"
-                  :key="indication"
-                >
-                  {{ indication }}
+              <p class="subtitle">Classe</p>
+              <ul class="indication-list" v-if="selectedMedication.classes.length > 0">
+                <li v-for="item in selectedMedication.classes" :key="item">
+                  {{ item }}
                 </li>
               </ul>
+              <p v-else class="empty-text">Não informado.</p>
+
+              <p class="subtitle">Reconstituição</p>
+              <ul
+                class="indication-list"
+                v-if="selectedMedication.reconstituition.length > 0"
+              >
+                <li
+                  v-for="item in selectedMedication.reconstituition"
+                  :key="item"
+                >
+                  {{ item }}
+                </li>
+              </ul>
+              <p v-else class="empty-text">Não informado.</p>
+
+              <p class="subtitle">Diluição</p>
+              <ul class="indication-list" v-if="selectedMedication.diluition.length > 0">
+                <li v-for="item in selectedMedication.diluition" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+              <p v-else class="empty-text">Não informado.</p>
+
+              <p class="subtitle">Tempo de infusão</p>
+              <ul
+                class="indication-list"
+                v-if="selectedMedication.infusionTime.length > 0"
+              >
+                <li v-for="item in selectedMedication.infusionTime" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+              <p v-else class="empty-text">Não informado.</p>
             </div>
 
             <div class="detail-calc">
               <section class="calc-card">
               <div class="calc-head">
                 <h3>Calculadora</h3>
-                <label class="checkbox-row">
-                  <input v-model="calculateByWeight" type="checkbox" />
-                  <span>Calcular por peso</span>
-                </label>
               </div>
 
               <div class="form-grid">
@@ -737,7 +1093,7 @@ loadMedications()
                   <input class="input" :value="selectedMedication.amountMg" readonly />
                 </label>
 
-                <label v-if="!calculateByWeight" class="field-group">
+                <label class="field-group">
                   <span>Quantidade prescrita (mg)</span>
                   <input
                     v-model="prescribedMg"
@@ -749,31 +1105,22 @@ loadMedications()
                   />
                 </label>
 
-                <template v-else>
-                  <label class="field-group">
-                    <span>Dose por kg (mg/kg)</span>
-                    <input
-                      v-model="mgPerKg"
-                      class="input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Ex.: 15"
-                    />
-                  </label>
+                <label class="field-group">
+                  <span>Diluição (mL)</span>
+                  <input
+                    v-model="dilutionMl"
+                    class="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Ex.: 50"
+                  />
+                </label>
+                
 
-                  <label class="field-group">
-                    <span>Peso do paciente (kg)</span>
-                    <input
-                      v-model="patientWeight"
-                      class="input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Ex.: 72"
-                    />
-                  </label>
-                </template>
+              <button type="button" class="btn-primary full" style="margin-top: 1rem; grid-column: 1 / -1;" @click="calculateDose">
+                Calcular
+              </button>
 
                 <label class="field-group full-row">
                   <span>Volume necessário (mL)</span>
@@ -784,11 +1131,17 @@ loadMedications()
                     placeholder="Resultado do cálculo"
                   />
                 </label>
-              </div>
 
-              <button type="button" class="btn-primary full" @click="calculateDose">
-                Calcular
-              </button>
+                <label class="field-group full-row">
+                  <span>Diluir em (mL)</span>
+                  <input
+                    class="input result"
+                    :value="diluteInMl"
+                    readonly
+                    placeholder="Resultado da diluição"
+                  />
+                </label>
+              </div>
 
               <p v-if="calcError" class="error-msg">{{ calcError }}</p>
               </section>
@@ -798,15 +1151,15 @@ loadMedications()
           <div v-else class="placeholder">
             <h2>Selecione um medicamento</h2>
             <p>
-              Ao escolher um item na busca, você verá a descrição, indicações e a
-              calculadora com os campos preenchidos automaticamente.
+              Ao escolher um item na busca, você verá a descrição, classe, reconstituição,
+              diluição, tempo de infusão e a calculadora com os campos preenchidos.
             </p>
           </div>
         </article>
       </section>
 
       <section v-if="canManage && activeView === 'admin'" class="admin-layout">
-        <article class="card admin-form-card">
+        <article ref="adminFormRef" class="card admin-form-card">
           <h2>Cadastro de medicamentos</h2>
           <!--<p class="muted">
             Área administrativa para adicionar novos medicamentos à base local da aplicação.
@@ -858,18 +1211,6 @@ loadMedications()
             </label>
 
             <label class="field-group">
-              <span>Dose padrão por kg (mg/kg, opcional)</span>
-              <input
-                v-model="newMedication.mgPerKgDefault"
-                class="input"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Ex.: 0.2"
-              />
-            </label>
-
-            <label class="field-group">
               <span>Descrição breve</span>
               <textarea
                 v-model="newMedication.description"
@@ -879,16 +1220,75 @@ loadMedications()
             </label>
 
             <label class="field-group">
-              <span>Indicações (separadas por vírgula)</span>
+              <span>Classe (separar por vírgula para mais de um item)</span>
               <input
-                v-model="newMedication.indications"
+                v-model="newMedication.classes"
                 class="input"
                 type="text"
-                placeholder="Ex.: Sedação, Convulsão, Pré-procedimento"
+                placeholder="Ex.: Antiviral, Penicilina, ..."
               />
             </label>
 
             <label class="field-group">
+              <span>Reconstituição (1 item por linha)</span>
+              <textarea
+                v-model="newMedication.reconstituition"
+                class="input textarea"
+                placeholder="Ex.: 1.000.000 UI: 2 mL"
+              ></textarea>
+            </label>
+
+            <label class="field-group">
+              <span>Diluição (1 item por linha)</span>
+              <textarea
+                v-model="newMedication.diluition"
+                class="input textarea"
+                placeholder="Ex.: EV Intermitente 50 mL"
+              ></textarea>
+            </label>
+
+            <label class="field-group">
+              <span>Tempo de infusão (1 item por linha)</span>
+              <textarea
+                v-model="newMedication.infusionTime"
+                class="input textarea"
+                placeholder="Ex.: Crianças: 60 min"
+              ></textarea>
+            </label>
+
+            <label class="field-group">
+              <span>Imagem (arquivo, opcional)</span>
+              <input
+                ref="imageFileInputRef"
+                class="input"
+                type="file"
+                accept="image/*"
+                @change="handleImageFileSelected"
+              />
+            </label>
+
+            <div v-if="uploadedImageDataUrl" class="image-preview-row">
+              <img
+                class="ampoule-image"
+                :src="uploadedImageDataUrl"
+                alt="Imagem do medicamento"
+              />
+              <div class="image-preview-actions">
+                <p class="image-preview-text">
+                  {{ uploadedImageLabel || 'Imagem selecionada.' }}
+                </p>
+                <button
+                  type="button"
+                  class="btn-danger compact"
+                  :disabled="adminLoading || imageProcessing"
+                  @click="removeUploadedImage"
+                >
+                  Remover foto
+                </button>
+              </div>
+            </div>
+
+            <label v-if="!uploadedImageDataUrl" class="field-group">
               <span>URL da imagem (opcional)</span>
               <input
                 v-model="newMedication.image"
@@ -899,14 +1299,18 @@ loadMedications()
             </label>
 
             <div class="admin-actions">
-              <button type="submit" class="btn-primary" :disabled="adminLoading">
+              <button
+                type="submit"
+                class="btn-primary"
+                :disabled="adminLoading || imageProcessing"
+              >
                 {{ adminLoading ? 'Salvando...' : isEditingMedication ? 'Salvar alterações' : 'Adicionar medicamento' }}
               </button>
               <button
                 v-if="isEditingMedication"
                 type="button"
                 class="btn-secondary"
-                :disabled="adminLoading"
+                :disabled="adminLoading || imageProcessing"
                 @click="cancelMedicationEdition"
               >
                 Cancelar edição
@@ -922,9 +1326,33 @@ loadMedications()
           <h2>Medicamentos adicionados</h2>
           <p class="muted">Total de cadastros: {{ medications.length }}</p>
 
-          <ul v-if="medications.length > 0" class="admin-med-list">
+          <p class="muted">
+            Pesquise por nome, apresentação ou classe. Pressione Enter para editar o
+            primeiro resultado.
+          </p>
+
+          <div class="search-box">
+            <input
+              v-model="adminSearchTerm"
+              class="input search-input"
+              type="text"
+              placeholder="Ex.: dipirona, ceftriaxona, antifúngico"
+              @keyup.enter="commitAdminSearch"
+            />
+            <button
+              v-if="adminSearchTerm"
+              type="button"
+              class="clear-btn"
+              aria-label="Limpar busca"
+              @click="clearAdminSearch"
+            >
+              ×
+            </button>
+          </div>
+
+          <ul v-if="adminFilteredMedications.length > 0" class="admin-med-list">
             <li
-              v-for="medication in medications"
+              v-for="medication in adminFilteredMedications"
               :key="medication.id"
               class="admin-med-item"
               :class="{ editing: editingMedicationId === medication.id }"
@@ -945,7 +1373,7 @@ loadMedications()
                   type="button"
                   class="btn-secondary compact"
                   :disabled="adminLoading"
-                  @click="startMedicationEdition(medication)"
+                  @click="editMedicationFromAdminSearch(medication)"
                 >
                   Editar
                 </button>
@@ -960,7 +1388,9 @@ loadMedications()
               </div>
             </li>
           </ul>
-          <p v-else class="empty-text">Nenhum medicamento cadastrado.</p>
+          <p v-else class="empty-text">
+            {{ adminSearchTerm ? 'Nenhum medicamento encontrado.' : 'Nenhum medicamento cadastrado.' }}
+          </p>
         </article>
       </section>
     </section>
