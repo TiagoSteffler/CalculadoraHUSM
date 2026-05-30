@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { api } from './services/api'
 
 const AUTH_KEY = 'husm-auth'
@@ -15,6 +15,12 @@ const authRole = ref('')
 const authToken = ref('')
 const isAuthenticated = ref(false)
 const activeView = ref('calculator')
+const installPromptEvent = ref(null)
+const isIosDevice = ref(false)
+const isStandaloneMode = ref(false)
+const canInstallApp = computed(() => Boolean(installPromptEvent.value))
+const showInstallCard = computed(() => !isStandaloneMode.value)
+let displayModeQuery = null
 
 const searchTerm = ref('')
 const selectedMedication = ref(null)
@@ -48,6 +54,42 @@ const createRedilutionInterval = () => ({
   amountMg: '',
   volumeMl: ''
 })
+
+const detectIosDevice = () => {
+  const ua = String(navigator?.userAgent ?? '').toLowerCase()
+  const isApple = /iphone|ipad|ipod/.test(ua)
+  const isTouchMac = ua.includes('mac') && 'ontouchend' in document
+  return isApple || isTouchMac
+}
+
+const updateStandaloneMode = () => {
+  const displayMode = window.matchMedia
+    ? window.matchMedia('(display-mode: standalone)').matches
+    : false
+  const iosStandalone = window.navigator?.standalone === true
+  isStandaloneMode.value = Boolean(displayMode || iosStandalone)
+}
+
+const handleBeforeInstallPrompt = (event) => {
+  event.preventDefault()
+  installPromptEvent.value = event
+}
+
+const handleAppInstalled = () => {
+  installPromptEvent.value = null
+  updateStandaloneMode()
+}
+
+const triggerInstall = async () => {
+  const promptEvent = installPromptEvent.value
+  if (!promptEvent) {
+    return
+  }
+
+  promptEvent.prompt()
+  await promptEvent.userChoice
+  installPromptEvent.value = null
+}
 
 const newMedication = reactive({
   name: '',
@@ -1074,6 +1116,34 @@ watch(authRole, (role) => {
   }
 })
 
+onMounted(() => {
+  isIosDevice.value = detectIosDevice()
+  updateStandaloneMode()
+
+  window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  window.addEventListener('appinstalled', handleAppInstalled)
+
+  if (window.matchMedia) {
+    displayModeQuery = window.matchMedia('(display-mode: standalone)')
+    if (displayModeQuery.addEventListener) {
+      displayModeQuery.addEventListener('change', updateStandaloneMode)
+    } else if (displayModeQuery.addListener) {
+      displayModeQuery.addListener(updateStandaloneMode)
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  window.removeEventListener('appinstalled', handleAppInstalled)
+
+  if (displayModeQuery?.removeEventListener) {
+    displayModeQuery.removeEventListener('change', updateStandaloneMode)
+  } else if (displayModeQuery?.removeListener) {
+    displayModeQuery.removeListener(updateStandaloneMode)
+  }
+})
+
 loadSession()
 loadRecentSearches()
 loadMedications()
@@ -1168,6 +1238,45 @@ loadMedications()
         </form>
 
         <p v-if="loginError" class="error-msg">{{ loginError }}</p>
+      </article>
+
+      <article v-if="showInstallCard" class="card login-card install-card">
+        <div class="install-header">
+          <h3>Instalar o app</h3>
+          <span class="badge">PWA</span>
+        </div>
+        <p class="muted">
+          Tenha acesso rapido pela tela inicial e use a calculadora offline quando
+          possivel.
+        </p>
+
+        <div class="install-actions">
+          <button
+            v-if="canInstallApp"
+            type="button"
+            class="btn-primary"
+            @click="triggerInstall"
+          >
+            Instalar app
+          </button>
+          <p v-else class="install-hint">
+            {{
+              isIosDevice
+                ? 'No iOS o botao nao aparece. Use o menu Compartilhar.'
+                : 'Se o botao nao aparecer, use o menu do navegador.'
+            }}
+          </p>
+        </div>
+
+        <div class="install-steps">
+          <p>
+            <strong>Android (Chrome/Edge):</strong> Menu (tres pontos): Instalar app
+            ou Adicionar a tela inicial.
+          </p>
+          <p>
+            <strong>iOS (Safari):</strong> Compartilhar: Adicionar a Tela de Inicio.
+          </p>
+        </div>
       </article>
     </section>
 
