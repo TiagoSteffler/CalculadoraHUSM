@@ -25,9 +25,9 @@ const medicationsLoading = ref(false)
 const medicationsError = ref('')
 
 const prescribedMg = ref('')
-const dilutionMl = ref('')
 const resultMl = ref('')
-const diluteInMl = ref('')
+const redilutionResultMl = ref('')
+const redilutionIntervalLabel = ref('')
 const calcError = ref('')
 
 const adminError = ref('')
@@ -40,6 +40,15 @@ const imageFileInputRef = ref(null)
 const uploadedImageDataUrl = ref('')
 const uploadedImageLabel = ref('')
 const imageProcessing = ref(false)
+const isSettingVariation = ref(false)
+const variationAutoEnabled = ref(true)
+const lastAutoVariation = ref('')
+const createRedilutionInterval = () => ({
+  operator: 'upTo',
+  amountMg: '',
+  volumeMl: ''
+})
+
 const newMedication = reactive({
   name: '',
   variation: '',
@@ -48,10 +57,28 @@ const newMedication = reactive({
   description: '',
   classes: '',
   reconstituition: '',
-  diluition: '',
+  redilutionIntervals: [createRedilutionInterval()],
   infusionTime: '',
   image: ''
 })
+
+const buildVariationLabel = (amount, volume) => {
+  const amountText = String(amount ?? '').trim()
+  const volumeText = String(volume ?? '').trim()
+
+  if (!amountText || !volumeText) {
+    return ''
+  }
+
+  return `${amountText} mg / ${volumeText} mL`
+}
+
+const syncVariationAutoState = () => {
+  const label = buildVariationLabel(newMedication.amountMg, newMedication.volumeMl)
+  lastAutoVariation.value = label
+  const current = String(newMedication.variation ?? '').trim()
+  variationAutoEnabled.value = !current || current === label
+}
 
 const isDataImageUrl = (value) =>
   typeof value === 'string' && value.trim().toLowerCase().startsWith('data:image/')
@@ -269,6 +296,92 @@ const parseMultilineInput = (value) => {
     .filter(Boolean)
 }
 
+const normalizeRedilutionIntervals = (value) => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => {
+      const operator = item?.operator === 'above' ? 'above' : 'upTo'
+      const amountMg = Number(item?.amountMg ?? item?.mg ?? 0)
+      const volumeMl = Number(item?.volumeMl ?? item?.ml ?? 0)
+
+      return {
+        operator,
+        amountMg,
+        volumeMl
+      }
+    })
+    .filter((interval) => interval.amountMg > 0 && interval.volumeMl > 0)
+}
+
+const sortRedilutionIntervals = (intervals) => {
+  const sorted = [...intervals].sort((a, b) => a.amountMg - b.amountMg)
+  const upTo = sorted.filter((interval) => interval.operator !== 'above')
+  const above = sorted.filter((interval) => interval.operator === 'above')
+  return [...upTo, ...above]
+}
+
+const formatRedilutionIntervals = (intervals) => {
+  const sorted = sortRedilutionIntervals(intervals)
+  const lines = []
+  let previousUpper = null
+
+  sorted.forEach((interval) => {
+    const amount = interval.amountMg
+    const volume = interval.volumeMl
+
+    if (interval.operator === 'above') {
+      lines.push(`acima de ${amount}mg: ${volume}ml`)
+      return
+    }
+
+    if (previousUpper) {
+      lines.push(`de ${previousUpper}mg até ${amount}mg: ${volume}ml`)
+    } else {
+      lines.push(`até ${amount}mg: ${volume}ml`)
+    }
+
+    previousUpper = amount
+  })
+
+  return lines
+}
+
+const resolveRedilutionInterval = (doseMg, intervals) => {
+  const sorted = sortRedilutionIntervals(intervals)
+  let previousUpper = null
+
+  for (const interval of sorted) {
+    const amount = interval.amountMg
+    const volume = interval.volumeMl
+    let label = ''
+
+    if (interval.operator === 'above') {
+      label = `acima de ${amount}mg: ${volume}ml`
+
+      if (doseMg > amount) {
+        return { interval, label }
+      }
+
+      continue
+    }
+
+    label = previousUpper
+      ? `de ${previousUpper}mg até ${amount}mg: ${volume}ml`
+      : `até ${amount}mg: ${volume}ml`
+
+    if (doseMg <= amount) {
+      return { interval, label }
+    }
+
+    previousUpper = amount
+  }
+
+  return null
+}
+
 const normalizeMedication = (medication) => {
   if (!medication || typeof medication !== 'object') {
     return null
@@ -289,6 +402,9 @@ const normalizeMedication = (medication) => {
     medication.reconstituition ?? medication.reconstitution
   )
   normalized.diluition = toStringArray(medication.diluition ?? medication.dilution)
+  normalized.redilutionIntervals = normalizeRedilutionIntervals(
+    medication.redilutionIntervals ?? medication.redilution
+  )
   normalized.infusionTime = toStringArray(medication.infusionTime)
 
   return normalized
@@ -311,6 +427,16 @@ const medicationLabel = (medication) =>
 
 const canManage = computed(() => authRole.value === 'ADMIN')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
+const redilutionDisplayLines = computed(() => {
+  const intervals = selectedMedication.value?.redilutionIntervals ?? []
+  const formatted = formatRedilutionIntervals(intervals)
+
+  if (formatted.length > 0) {
+    return formatted
+  }
+
+  return toStringArray(selectedMedication.value?.diluition ?? [])
+})
 
 const filteredMedications = computed(() => {
   const query = normalizeText(searchTerm.value.trim())
@@ -451,9 +577,9 @@ const saveRecentSearch = (term) => {
 
 const clearCalculator = () => {
   prescribedMg.value = ''
-  dilutionMl.value = ''
   resultMl.value = ''
-  diluteInMl.value = ''
+  redilutionResultMl.value = ''
+  redilutionIntervalLabel.value = ''
   calcError.value = ''
 }
 
@@ -465,9 +591,11 @@ const resetNewMedication = () => {
   newMedication.description = ''
   newMedication.classes = ''
   newMedication.reconstituition = ''
-  newMedication.diluition = ''
+  newMedication.redilutionIntervals = [createRedilutionInterval()]
   newMedication.infusionTime = ''
   newMedication.image = ''
+  lastAutoVariation.value = ''
+  variationAutoEnabled.value = true
   resetImageUpload()
 }
 
@@ -479,8 +607,16 @@ const populateMedicationForm = (medication) => {
   newMedication.description = medication.description
   newMedication.classes = medication.classes.join(', ')
   newMedication.reconstituition = medication.reconstituition.join('\n')
-  newMedication.diluition = medication.diluition.join('\n')
+  newMedication.redilutionIntervals =
+    medication.redilutionIntervals?.length > 0
+      ? medication.redilutionIntervals.map((interval) => ({
+          operator: interval.operator,
+          amountMg: String(interval.amountMg),
+          volumeMl: String(interval.volumeMl)
+        }))
+      : [createRedilutionInterval()]
   newMedication.infusionTime = medication.infusionTime.join('\n')
+  syncVariationAutoState()
 
   const rawImage = String(medication.image ?? '').trim()
   const cleanedImage = rawImage === DEFAULT_IMAGE ? '' : rawImage
@@ -672,11 +808,50 @@ const commitSearch = () => {
   saveRecentSearch(cleaned)
 }
 
+const addRedilutionInterval = () => {
+  newMedication.redilutionIntervals.push(createRedilutionInterval())
+}
+
+const removeRedilutionInterval = (index) => {
+  if (newMedication.redilutionIntervals.length === 1) {
+    Object.assign(newMedication.redilutionIntervals[0], createRedilutionInterval())
+    return
+  }
+
+  newMedication.redilutionIntervals = newMedication.redilutionIntervals.filter(
+    (_, i) => i !== index
+  )
+}
+
+const parseRedilutionIntervals = (intervals) =>
+  intervals
+    .map((interval) => {
+      const operator = interval.operator === 'above' ? 'above' : 'upTo'
+      const amountMg = Number(interval.amountMg)
+      const volumeMl = Number(interval.volumeMl)
+
+      if (!Number.isFinite(amountMg) || amountMg <= 0) {
+        return null
+      }
+
+      if (!Number.isFinite(volumeMl) || volumeMl <= 0) {
+        return null
+      }
+
+      return {
+        operator,
+        amountMg,
+        volumeMl
+      }
+    })
+    .filter(Boolean)
+
 const calculateDose = () => {
   if (!selectedMedication.value) {
     calcError.value = 'Selecione um medicamento antes de calcular.'
     resultMl.value = ''
-    diluteInMl.value = ''
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
     return
   }
 
@@ -686,33 +861,51 @@ const calculateDose = () => {
   if (ampouleVolume <= 0 || ampouleAmount <= 0) {
     calcError.value = 'Dados da ampola inválidos para cálculo.'
     resultMl.value = ''
-    diluteInMl.value = ''
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
     return
   }
 
   const prescribedValue = Number(prescribedMg.value)
-  const dilutionValue = Number(dilutionMl.value)
 
   if (prescribedValue <= 0) {
     calcError.value =
       'Informe a quantidade prescrita em mg com valor maior que zero.'
     resultMl.value = ''
-    diluteInMl.value = ''
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
     return
   }
 
-  if (dilutionValue <= 0) {
-    calcError.value = 'Informe a diluição (mL) com valor maior que zero.'
+  const intervals = selectedMedication.value.redilutionIntervals ?? []
+
+  if (intervals.length === 0) {
+    calcError.value = 'Nenhum intervalo de rediluição cadastrado para este medicamento.'
     resultMl.value = ''
-    diluteInMl.value = ''
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
+    return
+  }
+
+  const resolvedInterval = resolveRedilutionInterval(prescribedValue, intervals)
+
+  if (!resolvedInterval) {
+    calcError.value =
+      'Nenhum intervalo de rediluição compatível com a dose informada.'
+    resultMl.value = ''
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
     return
   }
 
   const volumeNeeded = (prescribedValue * ampouleVolume) / ampouleAmount
   resultMl.value = `${volumeNeeded.toFixed(2)} mL`
 
-  const diluentNeeded = (dilutionValue * prescribedValue) / ampouleAmount
-  diluteInMl.value = `${diluentNeeded.toFixed(2)} mL`
+  const diluentNeeded =
+    (prescribedValue * resolvedInterval.interval.volumeMl) /
+    resolvedInterval.interval.amountMg
+  redilutionResultMl.value = `${diluentNeeded.toFixed(2)} mL`
+  redilutionIntervalLabel.value = resolvedInterval.label
   calcError.value = ''
 }
 
@@ -738,7 +931,9 @@ const addMedication = async () => {
   const amountMg = Number(newMedication.amountMg)
   const classes = parseListInput(newMedication.classes)
   const reconstituition = parseMultilineInput(newMedication.reconstituition)
-  const diluition = parseMultilineInput(newMedication.diluition)
+  const redilutionIntervals = parseRedilutionIntervals(
+    newMedication.redilutionIntervals
+  )
   const infusionTime = parseMultilineInput(newMedication.infusionTime)
 
   if (!name || !variation) {
@@ -761,6 +956,11 @@ const addMedication = async () => {
     return
   }
 
+  if (redilutionIntervals.length === 0) {
+    adminError.value = 'Informe ao menos um intervalo de rediluição válido.'
+    return
+  }
+
   const medicationData = {
     name,
     variation,
@@ -769,7 +969,7 @@ const addMedication = async () => {
     description,
     classes,
     reconstituition,
-    diluition,
+    redilutionIntervals,
     infusionTime,
     image
   }
@@ -832,10 +1032,39 @@ const removeCustomMedication = async (id) => {
   }
 }
 
-watch([prescribedMg, dilutionMl], () => {
+watch([prescribedMg], () => {
   resultMl.value = ''
-  diluteInMl.value = ''
+  redilutionResultMl.value = ''
+  redilutionIntervalLabel.value = ''
   calcError.value = ''
+})
+
+watch(() => newMedication.variation, (value) => {
+  if (isSettingVariation.value) {
+    return
+  }
+
+  const trimmed = String(value ?? '').trim()
+
+  if (!trimmed) {
+    variationAutoEnabled.value = true
+    return
+  }
+
+  variationAutoEnabled.value = trimmed === lastAutoVariation.value
+})
+
+watch([() => newMedication.amountMg, () => newMedication.volumeMl], () => {
+  const label = buildVariationLabel(newMedication.amountMg, newMedication.volumeMl)
+  lastAutoVariation.value = label
+
+  if (!variationAutoEnabled.value) {
+    return
+  }
+
+  isSettingVariation.value = true
+  newMedication.variation = label
+  isSettingVariation.value = false
 })
 
 watch(authRole, (role) => {
@@ -1056,9 +1285,9 @@ loadMedications()
               </ul>
               <p v-else class="empty-text">Não informado.</p>
 
-              <p class="subtitle">Diluição</p>
-              <ul class="indication-list" v-if="selectedMedication.diluition.length > 0">
-                <li v-for="item in selectedMedication.diluition" :key="item">
+              <p class="subtitle">Rediluição</p>
+              <ul class="indication-list" v-if="redilutionDisplayLines.length > 0">
+                <li v-for="item in redilutionDisplayLines" :key="item">
                   {{ item }}
                 </li>
               </ul>
@@ -1105,22 +1334,9 @@ loadMedications()
                   />
                 </label>
 
-                <label class="field-group">
-                  <span>Diluição (mL)</span>
-                  <input
-                    v-model="dilutionMl"
-                    class="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Ex.: 50"
-                  />
-                </label>
-                
-
-              <button type="button" class="btn-primary full" style="margin-top: 1rem; grid-column: 1 / -1;" @click="calculateDose">
-                Calcular
-              </button>
+                <button type="button" class="btn-primary full" style="margin-top: 1rem; grid-column: 1 / -1;" @click="calculateDose">
+                  Calcular
+                </button>
 
                 <label class="field-group full-row">
                   <span>Volume necessário (mL)</span>
@@ -1133,14 +1349,18 @@ loadMedications()
                 </label>
 
                 <label class="field-group full-row">
-                  <span>Diluir em (mL)</span>
+                  <span>Rediluir em (mL)</span>
                   <input
                     class="input result"
-                    :value="diluteInMl"
+                    :value="redilutionResultMl"
                     readonly
-                    placeholder="Resultado da diluição"
+                    placeholder="Resultado da rediluição"
                   />
                 </label>
+
+                <p v-if="redilutionIntervalLabel" class="hint full-row">
+                  Intervalo aplicado: {{ redilutionIntervalLabel }}
+                </p>
               </div>
 
               <p v-if="calcError" class="error-msg">{{ calcError }}</p>
@@ -1152,7 +1372,7 @@ loadMedications()
             <h2>Selecione um medicamento</h2>
             <p>
               Ao escolher um item na busca, você verá a descrição, classe, reconstituição,
-              diluição, tempo de infusão e a calculadora com os campos preenchidos.
+              rediluição, tempo de infusão e a calculadora com os campos preenchidos.
             </p>
           </div>
         </article>
@@ -1239,12 +1459,56 @@ loadMedications()
             </label>
 
             <label class="field-group">
-              <span>Diluição (1 item por linha)</span>
-              <textarea
-                v-model="newMedication.diluition"
-                class="input textarea"
-                placeholder="Ex.: EV Intermitente 50 mL"
-              ></textarea>
+              <span>Rediluição (intervalos)</span>
+              <div class="redilution-intervals">
+                <button
+                  type="button"
+                  class="btn-secondary compact"
+                  @click="addRedilutionInterval"
+                >
+                  Adicionar intervalo
+                </button>
+                <div
+                  v-for="(interval, index) in newMedication.redilutionIntervals"
+                  :key="`interval-${index}`"
+                  class="redilution-row"
+                >
+                  <select v-model="interval.operator" class="input">
+                    <option value="upTo">até</option>
+                    <option value="above">acima de</option>
+                  </select>
+                  <div class="input-unit-wrap">
+                    <input
+                      v-model="interval.amountMg"
+                      class="input input-unit"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                    />
+                    <span class="input-unit-label">mg</span>
+                  </div>
+                  <div class="input-unit-wrap">
+                    <input
+                      v-model="interval.volumeMl"
+                      class="input input-unit"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                    />
+                    <span class="input-unit-label">mL</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn-danger compact"
+                    @click="removeRedilutionInterval(index)"
+                  >
+                    Remover
+                  </button>
+                </div>
+                
+              </div>
             </label>
 
             <label class="field-group">

@@ -582,6 +582,18 @@ p {
   gap: 12px;
 }
 
+.redilution-intervals {
+  display: grid;
+  gap: 10px;
+}
+
+.redilution-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.6fr) repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 .image-preview-row {
   display: flex;
   align-items: center;
@@ -818,6 +830,10 @@ p {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .redilution-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width:320px) {
@@ -828,4 +844,24 @@ p {
   .tab-icon {
     font-size: 1.25rem;
   }
+}
+
+.input-unit-wrap {
+  position: relative;
+}
+
+.input-unit {
+  padding-right: 42px;
+}
+
+.input-unit-label {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-soft);
+  pointer-events: none;
+  user-select: none;
 }
