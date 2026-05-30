@@ -1,10 +1,11 @@
-const CACHE_NAME = 'calculadora-husm-v1'
+const CACHE_NAME = 'calculadora-husm-v3'
 const CORE_ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './images/icon-192.png',
-  './images/icon-512.png',
+  './images/app_icon192x192.png',
+  './images/app_icon.png',
+  './images/app_icon512x512.png',
   './images/ampola.svg'
 ]
 
