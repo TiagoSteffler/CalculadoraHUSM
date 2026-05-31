@@ -5,11 +5,13 @@ import { api } from './services/api'
 const AUTH_KEY = 'husm-auth'
 const RECENT_KEY = 'husm-recent-searches'
 const DEFAULT_IMAGE = '/images/ampola.svg'
+const REPO_URL = 'https://github.com/TiagoSteffler/CalculadoraHUSM'
 
 const loginUser = ref('')
 const loginPassword = ref('')
 const loginError = ref('')
 const loginLoading = ref(false)
+const isAboutOpen = ref(false)
 const authUser = ref('')
 const authRole = ref('')
 const authToken = ref('')
@@ -81,6 +83,14 @@ const handleBeforeInstallPrompt = (event) => {
 const handleAppInstalled = () => {
   installPromptEvent.value = null
   updateStandaloneMode()
+}
+
+const openAbout = () => {
+  isAboutOpen.value = true
+}
+
+const closeAbout = () => {
+  isAboutOpen.value = false
 }
 
 const triggerInstall = async () => {
@@ -1381,6 +1391,12 @@ loadMedications()
           </p>
         </div>
       </article>
+
+      <footer class="login-footer">
+        <button type="button" class="about-link" @click="openAbout">
+          Sobre o app
+        </button>
+      </footer>
     </section>
 
     <section v-else class="dashboard-shell">
@@ -1870,5 +1886,48 @@ loadMedications()
         </article>
       </section>
     </section>
+
+    <div
+      v-if="isAboutOpen"
+      class="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Sobre o app"
+      @click.self="closeAbout"
+    >
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Sobre o app</h3>
+          <button
+            type="button"
+            class="modal-close"
+            aria-label="Fechar"
+            @click="closeAbout"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal-body">
+          <p>
+            Aplicativo desenvolvido por estudantes do PET-CC para o Hospital Universit&aacute;rio
+            de Santa Maria (UFSM).
+          </p>
+          <p>
+            Esta calculadora permite calcular, de forma r&aacute;pida e segura, a quantidade e
+            a redilu&iacute;&ccedil;&atilde;o de um medicamento prescrito, apoiando o trabalho do profissional
+            da sa&uacute;de.
+          </p>
+          <p>
+            A aplica&ccedil;&atilde;o web pode ser acessada pelo navegador ou instalada em dispositivos
+            m&oacute;veis e computadores.
+          </p>
+          <p>
+            O reposit&oacute;rio do aplicativo est&aacute; dispon&iacute;vel
+            <a :href="REPO_URL" target="_blank" rel="noreferrer">neste GitHub</a>.
+          </p>
+          <p class="modal-signature">PET-CC - 2026</p>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
