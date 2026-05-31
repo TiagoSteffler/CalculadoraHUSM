@@ -870,7 +870,13 @@ p {
   }
 
   .redilution-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(90px, 0.9fr) repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .redilution-row .btn-danger {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
 

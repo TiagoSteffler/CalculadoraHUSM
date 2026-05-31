@@ -21,6 +21,8 @@ const isStandaloneMode = ref(false)
 const canInstallApp = computed(() => Boolean(installPromptEvent.value))
 const showInstallCard = computed(() => !isStandaloneMode.value)
 let displayModeQuery = null
+let adminLayoutQuery = null
+let adminFormResizeObserver = null
 
 const searchTerm = ref('')
 const selectedMedication = ref(null)
@@ -42,6 +44,7 @@ const adminLoading = ref(false)
 const adminSearchTerm = ref('')
 const editingMedicationId = ref('')
 const adminFormRef = ref(null)
+const adminListRef = ref(null)
 const imageFileInputRef = ref(null)
 const uploadedImageDataUrl = ref('')
 const uploadedImageLabel = ref('')
@@ -89,6 +92,66 @@ const triggerInstall = async () => {
   promptEvent.prompt()
   await promptEvent.userChoice
   installPromptEvent.value = null
+}
+
+const resetAdminListSizing = () => {
+  if (!adminListRef.value) {
+    return
+  }
+
+  adminListRef.value.style.height = ''
+  adminListRef.value.style.maxHeight = ''
+  adminListRef.value.style.overflow = ''
+}
+
+const syncAdminListHeight = () => {
+  if (!adminFormRef.value || !adminListRef.value || typeof window === 'undefined') {
+    return
+  }
+
+  const isDesktop = window.matchMedia?.('(min-width: 1025px)').matches
+
+  if (!isDesktop) {
+    resetAdminListSizing()
+    return
+  }
+
+  const height = Math.max(0, Math.round(adminFormRef.value.getBoundingClientRect().height))
+  adminListRef.value.style.height = `${height}px`
+  adminListRef.value.style.maxHeight = `${height}px`
+  adminListRef.value.style.overflow = 'hidden'
+}
+
+const setupAdminListSync = () => {
+  if (!canManage.value || activeView.value !== 'admin') {
+    resetAdminListSizing()
+    if (adminFormResizeObserver) {
+      adminFormResizeObserver.disconnect()
+      adminFormResizeObserver = null
+    }
+    return
+  }
+
+  if (!adminFormRef.value || !adminListRef.value || typeof window === 'undefined') {
+    return
+  }
+
+  if ('ResizeObserver' in window) {
+    if (adminFormResizeObserver) {
+      adminFormResizeObserver.disconnect()
+    }
+
+    adminFormResizeObserver = new ResizeObserver(() => {
+      syncAdminListHeight()
+    })
+    adminFormResizeObserver.observe(adminFormRef.value)
+  }
+
+  syncAdminListHeight()
+}
+
+const handleAdminLayoutChange = () => {
+  syncAdminListHeight()
 }
 
 const newMedication = reactive({
@@ -467,6 +530,13 @@ const slugify = (value) =>
 const medicationLabel = (medication) =>
   `${medication.name} ${medication.variation}`
 
+const sortMedications = (items) =>
+  [...items].sort((a, b) => {
+    const labelA = normalizeText(medicationLabel(a))
+    const labelB = normalizeText(medicationLabel(b))
+    return labelA.localeCompare(labelB, 'pt-BR')
+  })
+
 const canManage = computed(() => authRole.value === 'ADMIN')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
 const redilutionDisplayLines = computed(() => {
@@ -484,10 +554,10 @@ const filteredMedications = computed(() => {
   const query = normalizeText(searchTerm.value.trim())
 
   if (!query) {
-    return medications.value
+    return sortMedications(medications.value)
   }
 
-  return medications.value.filter((medication) => {
+  const filtered = medications.value.filter((medication) => {
     const searchableText = normalizeText(
       [
         medication.name,
@@ -499,16 +569,18 @@ const filteredMedications = computed(() => {
 
     return searchableText.includes(query)
   })
+
+  return sortMedications(filtered)
 })
 
 const adminFilteredMedications = computed(() => {
   const query = normalizeText(adminSearchTerm.value.trim())
 
   if (!query) {
-    return medications.value
+    return sortMedications(medications.value)
   }
 
-  return medications.value.filter((medication) => {
+  const filtered = medications.value.filter((medication) => {
     const searchableText = normalizeText(
       [
         medication.name,
@@ -520,6 +592,8 @@ const adminFilteredMedications = computed(() => {
 
     return searchableText.includes(query)
   })
+
+  return sortMedications(filtered)
 })
 
 const roleLabel = computed(() =>
@@ -1116,6 +1190,11 @@ watch(authRole, (role) => {
   }
 })
 
+watch([activeView, canManage], async () => {
+  await nextTick()
+  setupAdminListSync()
+})
+
 onMounted(() => {
   isIosDevice.value = detectIosDevice()
   updateStandaloneMode()
@@ -1131,6 +1210,17 @@ onMounted(() => {
       displayModeQuery.addListener(updateStandaloneMode)
     }
   }
+
+  if (window.matchMedia) {
+    adminLayoutQuery = window.matchMedia('(min-width: 1025px)')
+    if (adminLayoutQuery.addEventListener) {
+      adminLayoutQuery.addEventListener('change', handleAdminLayoutChange)
+    } else if (adminLayoutQuery.addListener) {
+      adminLayoutQuery.addListener(handleAdminLayoutChange)
+    }
+  }
+
+  setupAdminListSync()
 })
 
 onBeforeUnmount(() => {
@@ -1141,6 +1231,17 @@ onBeforeUnmount(() => {
     displayModeQuery.removeEventListener('change', updateStandaloneMode)
   } else if (displayModeQuery?.removeListener) {
     displayModeQuery.removeListener(updateStandaloneMode)
+  }
+
+  if (adminLayoutQuery?.removeEventListener) {
+    adminLayoutQuery.removeEventListener('change', handleAdminLayoutChange)
+  } else if (adminLayoutQuery?.removeListener) {
+    adminLayoutQuery.removeListener(handleAdminLayoutChange)
+  }
+
+  if (adminFormResizeObserver) {
+    adminFormResizeObserver.disconnect()
+    adminFormResizeObserver = null
   }
 })
 
@@ -1242,12 +1343,11 @@ loadMedications()
 
       <article v-if="showInstallCard" class="card login-card install-card">
         <div class="install-header">
-          <h3>Instalar o app</h3>
+          <h3>Instalar app</h3>
           <span class="badge">PWA</span>
         </div>
         <p class="muted">
-          Tenha acesso rapido pela tela inicial e use a calculadora offline quando
-          possivel.
+          Tenha acesso rápido pela tela inicial do seu dispositivo.
         </p>
 
         <div class="install-actions">
@@ -1260,21 +1360,24 @@ loadMedications()
             Instalar app
           </button>
           <p v-else class="install-hint">
-            {{
-              isIosDevice
-                ? 'No iOS o botao nao aparece. Use o menu Compartilhar.'
-                : 'Se o botao nao aparecer, use o menu do navegador.'
-            }}
+            Se o botão não aparecer, siga os passos abaixo.
+            
           </p>
         </div>
 
         <div class="install-steps">
           <p>
-            <strong>Android (Chrome/Edge):</strong> Menu (tres pontos): Instalar app
-            ou Adicionar a tela inicial.
+            <strong>Android (Chrome/Edge):</strong> Menu (três pontos) → Instalar
+            app | Adicionar à tela inicial.
           </p>
           <p>
-            <strong>iOS (Safari):</strong> Compartilhar: Adicionar a Tela de Inicio.
+            <strong>iPhone (Safari):</strong> Compartilhar → Adicionar à Tela de Início.
+          </p>
+          <p>
+            <strong>Chrome/Edge (Windows/MacOS):</strong> Menu (três pontos) → Transmitir, salvar e compartilhar → Instalar Calculadora HUSM | Criar atalho.
+          </p>
+          <p>
+            <strong>Safari (MacOS):</strong> Compartilhar → Adicionar ao Dock.
           </p>
         </div>
       </article>
@@ -1695,7 +1798,7 @@ loadMedications()
           <p v-if="adminSuccess" class="success-msg">{{ adminSuccess }}</p>
         </article>
 
-        <article class="card admin-list-card">
+        <article ref="adminListRef" class="card admin-list-card">
           <h2>Medicamentos adicionados</h2>
           <p class="muted">Total de cadastros: {{ medications.length }}</p>
 
