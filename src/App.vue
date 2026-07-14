@@ -293,7 +293,7 @@ const resizeImageToHdDataUrl = (dataUrl) =>
     const image = new Image()
 
     image.onload = () => {
-      const maxDimension = 1280
+      const maxDimension = 800
       const { width, height } = image
 
       if (!width || !height) {
@@ -350,6 +350,12 @@ const handleImageFileSelected = async (event) => {
 
   if (!file.type?.startsWith('image/')) {
     adminError.value = 'Selecione um arquivo de imagem válido.'
+    input.value = ''
+    return
+  }
+
+  if (file.size > 3 * 1024 * 1024) {
+    adminError.value = 'A imagem excede o limite máximo de 3MB.'
     input.value = ''
     return
   }
@@ -492,6 +498,18 @@ const resolveRedilutionInterval = (doseMg, intervals) => {
     }
 
     previousUpper = amount
+  }
+
+  // Fallback to the largest 'upTo' interval if doseMg exceeds all defined intervals
+  const upToIntervals = sorted.filter(i => i.operator !== 'above')
+  if (upToIntervals.length > 0) {
+    const lastInterval = upToIntervals[upToIntervals.length - 1]
+    if (doseMg > lastInterval.amountMg) {
+      return { 
+        interval: lastInterval, 
+        label: `acima de ${lastInterval.amountMg}mg (utilizando o último intervalo): ${lastInterval.volumeMl}ml` 
+      }
+    }
   }
 
   return null
