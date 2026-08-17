@@ -904,6 +904,7 @@ const handleLogin = async () => {
 const handleLogout = () => {
   sessionStorage.removeItem(AUTH_KEY)
   api.setToken(null)
+  api.logout?.()
   isAuthenticated.value = false
   authUser.value = ''
   authRole.value = ''

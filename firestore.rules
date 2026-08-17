@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper: verifica se está logado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper: verifica se o usuário é ADMIN
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
+        request.auth.token.email.matches('admin@.*')
+      );
+    }
+
+    // Coleção de Medicamentos
+    match /medicamentos/{medicamentoId} {
+      // Qualquer profissional (ou visitante) pode ler a lista de medicamentos
+      allow read: if true;
+      
+      // Apenas usuários autenticados (ou administradores) podem criar, atualizar e excluir
+      allow write: if isAuthenticated();
+    }
+
+    // Coleção de Perfis de Usuários
+    match /users/{userId} {
+      // O próprio usuário pode ler seu perfil ou ADMIN
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // O próprio usuário ou ADMIN pode salvar/atualizar seu perfil
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+  }
+}
