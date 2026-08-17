@@ -714,9 +714,40 @@ p {
   gap: 12px;
 }
 
+.field-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkbox-inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+
+.checkbox-inline-label input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
 .redilution-intervals {
   display: grid;
   gap: 10px;
+}
+
+.redilution-custom-wrap {
+  display: grid;
+  gap: 8px;
 }
 
 .redilution-row {
@@ -724,6 +755,38 @@ p {
   grid-template-columns: minmax(140px, 0.6fr) repeat(2, minmax(0, 1fr)) auto;
   gap: 10px;
   align-items: center;
+}
+
+.not-applicable-container {
+  margin-top: 4px;
+}
+
+.not-applicable-box {
+  background: #f0fdf9;
+  border: 1px solid #bfece0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.not-applicable-badge {
+  display: inline-block;
+  background: #0f766e;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.not-applicable-text {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #134e48;
+  line-height: 1.5;
+  white-space: pre-line;
 }
 
 .image-preview-row {

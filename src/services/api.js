@@ -12,7 +12,6 @@ import {
   deleteDoc
 } from 'firebase/firestore'
 import { auth, db, isFirebaseConfigured } from './firebase'
-import { medications as defaultMedications } from '../data/medications'
 
 const toEmail = (username) => {
   const clean = String(username || '').trim().toLowerCase()
@@ -84,7 +83,6 @@ class MedicamentosFirebaseAPI {
     const email = toEmail(cleanUser)
 
     if (!isFirebaseConfigured) {
-      // Offline / fallback demo mode if Firebase credentials are not yet added to .env.local
       console.warn('[Firebase] Usando login em modo fallback (Firebase não configurado).')
       const role = cleanUser === 'admin' ? 'ADMIN' : 'USER'
       const fakeToken = `offline-token-${Date.now()}`
@@ -213,8 +211,7 @@ class MedicamentosFirebaseAPI {
   // Medications CRUD endpoints
   async getMedications() {
     if (!isFirebaseConfigured) {
-      console.warn('[Firebase] Retornando medicamentos padrão locais (Firebase não configurado).')
-      return defaultMedications
+      return []
     }
 
     try {
@@ -222,12 +219,7 @@ class MedicamentosFirebaseAPI {
       const snapshot = await getDocs(colRef)
 
       if (snapshot.empty) {
-        // Automatically seed initial medications to Firestore
-        console.info('[Firebase] Coleção vazia. Semeando medicamentos iniciais no Firestore...')
-        for (const med of defaultMedications) {
-          await setDoc(doc(db, 'medicamentos', med.id), sanitizeForFirestore(med))
-        }
-        return defaultMedications
+        return []
       }
 
       return snapshot.docs.map((docSnap) => ({
@@ -236,15 +228,12 @@ class MedicamentosFirebaseAPI {
       }))
     } catch (error) {
       console.error('[Firebase] Erro ao buscar medicamentos no Firestore:', error)
-      // Fallback to local default data on error to prevent breaking user experience
-      return defaultMedications
+      return []
     }
   }
 
   async getMedicationById(id) {
     if (!isFirebaseConfigured) {
-      const found = defaultMedications.find((m) => m.id === id)
-      if (found) return found
       throw new Error('Medicamento não encontrado.')
     }
 

@@ -172,6 +172,8 @@ const newMedication = reactive({
   description: '',
   classes: '',
   reconstituition: '',
+  redilutionNotApplicable: false,
+  redilutionCustomText: '',
   redilutionIntervals: [createRedilutionInterval()],
   infusionTime: '',
   image: ''
@@ -535,6 +537,8 @@ const normalizeMedication = (medication) => {
     medication.reconstituition ?? medication.reconstitution
   )
   normalized.diluition = toStringArray(medication.diluition ?? medication.dilution)
+  normalized.redilutionNotApplicable = Boolean(medication.redilutionNotApplicable)
+  normalized.redilutionCustomText = String(medication.redilutionCustomText ?? '')
   normalized.redilutionIntervals = normalizeRedilutionIntervals(
     medication.redilutionIntervals ?? medication.redilution
   )
@@ -568,6 +572,18 @@ const sortMedications = (items) =>
 const canManage = computed(() => authRole.value === 'ADMIN')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
 const redilutionDisplayLines = computed(() => {
+  if (selectedMedication.value?.redilutionNotApplicable) {
+    const custom = selectedMedication.value?.redilutionCustomText?.trim()
+    if (custom) {
+      return parseMultilineInput(custom)
+    }
+    const legacyDiluition = toStringArray(selectedMedication.value?.diluition ?? [])
+    if (legacyDiluition.length > 0) {
+      return legacyDiluition
+    }
+    return ['Não necessita rediluição.']
+  }
+
   const intervals = selectedMedication.value?.redilutionIntervals ?? []
   const formatted = formatRedilutionIntervals(intervals)
 
@@ -735,6 +751,8 @@ const resetNewMedication = () => {
   newMedication.description = ''
   newMedication.classes = ''
   newMedication.reconstituition = ''
+  newMedication.redilutionNotApplicable = false
+  newMedication.redilutionCustomText = ''
   newMedication.redilutionIntervals = [createRedilutionInterval()]
   newMedication.infusionTime = ''
   newMedication.image = ''
@@ -751,6 +769,10 @@ const populateMedicationForm = (medication) => {
   newMedication.description = medication.description
   newMedication.classes = medication.classes.join(', ')
   newMedication.reconstituition = medication.reconstituition.join('\n')
+  newMedication.redilutionNotApplicable = Boolean(medication.redilutionNotApplicable)
+  newMedication.redilutionCustomText = String(
+    medication.redilutionCustomText ?? (Array.isArray(medication.diluition) ? medication.diluition.join('\n') : '')
+  )
   newMedication.redilutionIntervals =
     medication.redilutionIntervals?.length > 0
       ? medication.redilutionIntervals.map((interval) => ({
@@ -1022,11 +1044,21 @@ const calculateDose = () => {
     return
   }
 
+  const volumeNeeded = (prescribedValue * ampouleVolume) / ampouleAmount
+  resultMl.value = `${volumeNeeded.toFixed(2)} mL`
+
+  // Quando o medicamento não necessita de rediluição por intervalos
+  if (selectedMedication.value.redilutionNotApplicable) {
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
+    calcError.value = ''
+    return
+  }
+
   const intervals = selectedMedication.value.redilutionIntervals ?? []
 
   if (intervals.length === 0) {
     calcError.value = 'Nenhum intervalo de rediluição cadastrado para este medicamento.'
-    resultMl.value = ''
     redilutionResultMl.value = ''
     redilutionIntervalLabel.value = ''
     return
@@ -1037,14 +1069,10 @@ const calculateDose = () => {
   if (!resolvedInterval) {
     calcError.value =
       'Nenhum intervalo de rediluição compatível com a dose informada.'
-    resultMl.value = ''
     redilutionResultMl.value = ''
     redilutionIntervalLabel.value = ''
     return
   }
-
-  const volumeNeeded = (prescribedValue * ampouleVolume) / ampouleAmount
-  resultMl.value = `${volumeNeeded.toFixed(2)} mL`
 
   const diluentNeeded =
     (prescribedValue * resolvedInterval.interval.volumeMl) /
@@ -1076,9 +1104,11 @@ const addMedication = async () => {
   const amountMg = Number(newMedication.amountMg)
   const classes = parseListInput(newMedication.classes)
   const reconstituition = parseMultilineInput(newMedication.reconstituition)
-  const redilutionIntervals = parseRedilutionIntervals(
-    newMedication.redilutionIntervals
-  )
+  const redilutionNotApplicable = Boolean(newMedication.redilutionNotApplicable)
+  const redilutionCustomText = String(newMedication.redilutionCustomText ?? '').trim()
+  const redilutionIntervals = redilutionNotApplicable
+    ? []
+    : parseRedilutionIntervals(newMedication.redilutionIntervals)
   const infusionTime = parseMultilineInput(newMedication.infusionTime)
 
   if (!name || !variation) {
@@ -1101,8 +1131,8 @@ const addMedication = async () => {
     return
   }
 
-  if (redilutionIntervals.length === 0) {
-    adminError.value = 'Informe ao menos um intervalo de rediluição válido.'
+  if (!redilutionNotApplicable && redilutionIntervals.length === 0) {
+    adminError.value = 'Informe ao menos um intervalo de rediluição válido ou marque "Não se aplica / Outras regras".'
     return
   }
 
@@ -1114,6 +1144,8 @@ const addMedication = async () => {
     description,
     classes,
     reconstituition,
+    redilutionNotApplicable,
+    redilutionCustomText,
     redilutionIntervals,
     infusionTime,
     image
@@ -1595,7 +1627,7 @@ loadMedications()
                   />
                 </label>
 
-                <label class="field-group full-row">
+                <label v-if="!selectedMedication.redilutionNotApplicable" class="field-group full-row">
                   <span>Rediluir em (mL)</span>
                   <input
                     class="input result"
@@ -1605,7 +1637,20 @@ loadMedications()
                   />
                 </label>
 
-                <p v-if="redilutionIntervalLabel" class="hint full-row">
+                <div v-else class="field-group full-row not-applicable-container">
+                  <span>Rediluição</span>
+                  <div class="not-applicable-box">
+                    <div class="not-applicable-badge">Não necessita rediluição</div>
+                    <div v-if="selectedMedication.redilutionCustomText" class="not-applicable-text">
+                      {{ selectedMedication.redilutionCustomText }}
+                    </div>
+                    <div v-else-if="selectedMedication.diluition?.length > 0" class="not-applicable-text">
+                      <p v-for="item in selectedMedication.diluition" :key="item">{{ item }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <p v-if="!selectedMedication.redilutionNotApplicable && redilutionIntervalLabel" class="hint full-row">
                   Intervalo aplicado: {{ redilutionIntervalLabel }}
                 </p>
               </div>
@@ -1706,8 +1751,18 @@ loadMedications()
             </label>
 
             <label class="field-group">
-              <span>Rediluição (intervalos)</span>
-              <div class="redilution-intervals">
+              <div class="field-head-row">
+                <span>Rediluição (intervalos)</span>
+                <label class="checkbox-inline-label">
+                  <input
+                    v-model="newMedication.redilutionNotApplicable"
+                    type="checkbox"
+                  />
+                  <span>Não se aplica / Outras regras</span>
+                </label>
+              </div>
+
+              <div v-if="!newMedication.redilutionNotApplicable" class="redilution-intervals">
                 <button
                   type="button"
                   class="btn-secondary compact"
@@ -1754,7 +1809,15 @@ loadMedications()
                     Remover
                   </button>
                 </div>
-                
+              </div>
+
+              <div v-else class="redilution-custom-wrap">
+                <textarea
+                  v-model="newMedication.redilutionCustomText"
+                  class="input textarea"
+                  placeholder="Descreva os detalhes ou regras de rediluição (ex.: Não necessita rediluição. Infundir a solução pura em 15 minutos...)"
+                  rows="3"
+                ></textarea>
               </div>
             </label>
 
