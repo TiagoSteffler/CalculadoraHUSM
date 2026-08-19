@@ -594,16 +594,6 @@ p {
   gap: 16px;
 }
 
-.ampoule-image {
-  width: 110px;
-  height: 110px;
-  object-fit: contain;
-  border-radius: 16px;
-  border: 1px solid #c8e0db;
-  background: #f8fffe;
-  padding: 10px;
-}
-
 .med-variation {
   margin-top: 6px;
   color: #2a7470;
@@ -789,27 +779,112 @@ p {
   white-space: pre-line;
 }
 
-.image-preview-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  border: 1px solid #c9e1da;
-  background: #f7fcfa;
-  border-radius: 16px;
-  padding: 12px;
+.redilution-detail-group + .redilution-detail-group {
+  margin-top: 12px;
 }
 
-.image-preview-actions {
+.redilution-detail-title {
+  margin-bottom: 6px;
+  color: #2a6460;
+  font-weight: 800;
+}
+
+.redilution-mode-fieldset,
+.redilution-config-section {
+  min-width: 0;
+  border: 1px solid #c9e1da;
+  border-radius: 16px;
+  background: #f7fcfa;
+  padding: 14px;
+}
+
+.redilution-mode-fieldset legend {
+  padding: 0 6px;
+  color: #2a6460;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.redilution-mode-fieldset .hint {
+  margin-top: 0;
+}
+
+.redilution-mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.radio-inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.radio-inline-label input[type="radio"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.dual-redilution-configs {
+  margin: 0px;
+}
+
+.redilution-config-section {
   display: grid;
+  gap: 12px;
+  margin: 10px 0px;
+}
+
+.redilution-config-section h3 {
+  color: #245e5a;
+  font-size: 1.15rem;
+}
+
+.dual-redilution-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dual-redilution-card {
+  min-width: 0;
+  border: 1px solid #bfe1d9;
+  border-radius: 14px;
+  background: #f3fbf8;
+  padding: 14px;
+  display: grid;
+  align-content: start;
   gap: 8px;
 }
 
-.image-preview-text {
+.dual-redilution-card h4 {
   margin: 0;
+  color: #195f59;
+  font-size: 1rem;
+}
+
+.result-caption {
   color: var(--text-soft);
+  font-size: 0.86rem;
   font-weight: 700;
-  font-size: 0.9rem;
+}
+
+.dual-result-value {
+  color: #0d5e58;
+  font-size: clamp(1.25rem, 1rem + 1vw, 1.6rem);
+  line-height: 1.1;
+}
+
+.dual-redilution-card .hint {
+  margin-top: 0;
+  line-height: 1.35;
 }
 
 .provisional-note {
@@ -999,9 +1074,9 @@ p {
     width: 100%;
   }
 
-  .ampoule-image {
-    width: 84px;
-    height: 84px;
+  .dual-redilution-configs,
+  .dual-redilution-results {
+    grid-template-columns: 1fr;
   }
 
   .form-grid {
