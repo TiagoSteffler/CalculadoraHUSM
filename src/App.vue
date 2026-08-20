@@ -57,10 +57,20 @@ const createRedilutionInterval = () => ({
 })
 
 const createRedilutionConfig = () => ({
+  disabled: false,
   notApplicable: false,
   customText: '',
+  hasObservations: false,
+  observations: '',
   intervals: [createRedilutionInterval()]
 })
+
+const redilutionModeCategories = [
+  { id: 'single', label: 'Rediluição padrão' },
+  { id: 'ev', label: 'Por tipo EV (direto/intermitente)' },
+  { id: 'age', label: 'Por faixa etária (pediatria/adulto)' },
+  { id: 'access', label: 'Por tipo de acesso (periférico/central)' }
+]
 
 const detectIosDevice = () => {
   const ua = String(navigator?.userAgent ?? '').toLowerCase()
@@ -104,6 +114,32 @@ const triggerInstall = async () => {
   promptEvent.prompt()
   await promptEvent.userChoice
   installPromptEvent.value = null
+}
+
+const isReloading = ref(false)
+
+const handleHardReload = async () => {
+  try {
+    isReloading.value = true
+
+    // 1. Limpar caches do CacheStorage (Workbox / PWA)
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((key) => caches.delete(key)))
+    }
+
+    // 2. Desregistrar Service Workers para forçar obtenção da versão mais recente
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((registration) => registration.unregister()))
+    }
+
+    // 3. Recarregar a página
+    window.location.reload()
+  } catch (error) {
+    console.error('Erro ao limpar cache e recarregar:', error)
+    window.location.reload()
+  }
 }
 
 const resetAdminListSizing = () => {
@@ -174,15 +210,41 @@ const newMedication = reactive({
   description: '',
   classes: '',
   reconstituition: '',
-  redilutionNotApplicable: false,
-  redilutionCustomText: '',
-  redilutionIntervals: [createRedilutionInterval()],
-  redilutionMode: 'single',
+  redilutionModes: ['single'],
+  redilutionStandard: createRedilutionConfig(),
   redilutionEVDireto: createRedilutionConfig(),
   redilutionEVIntermitente: createRedilutionConfig(),
   redilutionPediatria: createRedilutionConfig(),
   redilutionAdulto: createRedilutionConfig(),
+  redilutionAcessoPeriferico: createRedilutionConfig(),
+  redilutionAcessoCentral: createRedilutionConfig(),
+  redilutionNotApplicable: false,
+  redilutionCustomText: '',
+  redilutionIntervals: [createRedilutionInterval()],
   infusionTime: ''
+})
+
+const redilutionConfigSections = computed(() => {
+  const sections = []
+  const modes = newMedication.redilutionModes || []
+
+  if (modes.includes('single')) {
+    sections.push({ key: 'redilutionStandard', label: 'Rediluição padrão', mode: 'single' })
+  }
+  if (modes.includes('ev')) {
+    sections.push({ key: 'redilutionEVDireto', label: 'EV Direto', mode: 'ev' })
+    sections.push({ key: 'redilutionEVIntermitente', label: 'EV Intermitente', mode: 'ev' })
+  }
+  if (modes.includes('age')) {
+    sections.push({ key: 'redilutionPediatria', label: 'Pediatria', mode: 'age' })
+    sections.push({ key: 'redilutionAdulto', label: 'Adulto', mode: 'age' })
+  }
+  if (modes.includes('access')) {
+    sections.push({ key: 'redilutionAcessoPeriferico', label: 'Acesso Periférico', mode: 'access' })
+    sections.push({ key: 'redilutionAcessoCentral', label: 'Acesso Central', mode: 'access' })
+  }
+
+  return sections
 })
 
 const buildVariationLabel = (amount, volume) => {
@@ -356,25 +418,48 @@ const normalizeMedication = (medication) => {
     medication.reconstituition ?? medication.reconstitution
   )
   normalized.diluition = toStringArray(medication.diluition ?? medication.dilution)
-  normalized.redilutionNotApplicable = Boolean(medication.redilutionNotApplicable)
-  normalized.redilutionCustomText = String(medication.redilutionCustomText ?? '')
-  normalized.redilutionIntervals = normalizeRedilutionIntervals(
-    medication.redilutionIntervals ?? medication.redilution
-  )
-  normalized.redilutionMode = ['single', 'ev', 'age'].includes(medication.redilutionMode)
-    ? medication.redilutionMode
-    : 'single'
 
-  const normalizeRedilutionConfig = (config) => ({
-    notApplicable: Boolean(config?.notApplicable),
-    customText: String(config?.customText ?? ''),
-    intervals: normalizeRedilutionIntervals(config?.intervals)
+  const normalizeRedilutionConfig = (config, legacyNotApplicable = false, legacyCustomText = '', legacyIntervals = []) => ({
+    disabled: Boolean(config?.disabled),
+    notApplicable: config !== undefined && config !== null ? Boolean(config.notApplicable) : Boolean(legacyNotApplicable),
+    customText: String(config?.customText ?? legacyCustomText ?? ''),
+    hasObservations: Boolean(config?.hasObservations || config?.observations),
+    observations: String(config?.observations ?? ''),
+    intervals: normalizeRedilutionIntervals(config?.intervals ?? legacyIntervals)
   })
 
+  let modes = []
+  if (Array.isArray(medication.redilutionModes) && medication.redilutionModes.length > 0) {
+    modes = medication.redilutionModes.filter((m) => ['single', 'ev', 'age', 'access'].includes(m))
+  } else if (medication.redilutionMode) {
+    modes = [medication.redilutionMode]
+  }
+  if (modes.length === 0) {
+    modes = ['single']
+  }
+  normalized.redilutionModes = modes
+  normalized.redilutionMode = modes[0] || 'single'
+
+  normalized.redilutionStandard = normalizeRedilutionConfig(
+    medication.redilutionStandard,
+    medication.redilutionNotApplicable,
+    medication.redilutionCustomText,
+    medication.redilutionIntervals
+  )
   normalized.redilutionEVDireto = normalizeRedilutionConfig(medication.redilutionEVDireto)
   normalized.redilutionEVIntermitente = normalizeRedilutionConfig(medication.redilutionEVIntermitente)
   normalized.redilutionPediatria = normalizeRedilutionConfig(medication.redilutionPediatria)
   normalized.redilutionAdulto = normalizeRedilutionConfig(medication.redilutionAdulto)
+  normalized.redilutionAcessoPeriferico = normalizeRedilutionConfig(
+    medication.redilutionAcessoPeriferico || medication.redilutionPeriferico
+  )
+  normalized.redilutionAcessoCentral = normalizeRedilutionConfig(
+    medication.redilutionAcessoCentral || medication.redilutionCentral
+  )
+
+  normalized.redilutionNotApplicable = normalized.redilutionStandard.notApplicable
+  normalized.redilutionCustomText = normalized.redilutionStandard.customText
+  normalized.redilutionIntervals = normalized.redilutionStandard.intervals
   normalized.infusionTime = toStringArray(medication.infusionTime)
 
   return normalized
@@ -404,60 +489,91 @@ const sortMedications = (items) =>
 
 const canManage = computed(() => authRole.value === 'ADMIN')
 const isEditingMedication = computed(() => Boolean(editingMedicationId.value))
-const redilutionConfigDisplayLines = (config, legacyDiluition = []) => {
-  if (config.notApplicable) {
-    const custom = config.customText.trim()
-    return custom ? parseMultilineInput(custom) : legacyDiluition.length > 0 ? legacyDiluition : ['Não necessita rediluição.']
+
+const getActiveRedilutionConfigurations = (medication) => {
+  if (!medication) return []
+
+  const modes = Array.isArray(medication.redilutionModes) && medication.redilutionModes.length > 0
+    ? medication.redilutionModes
+    : [medication.redilutionMode || 'single']
+
+  const configs = []
+
+  if (modes.includes('single')) {
+    const cfg = medication.redilutionStandard || {
+      disabled: false,
+      notApplicable: medication.redilutionNotApplicable,
+      customText: medication.redilutionCustomText,
+      hasObservations: false,
+      observations: '',
+      intervals: medication.redilutionIntervals || []
+    }
+    if (!cfg.disabled) {
+      configs.push({ label: 'Padrão', config: cfg })
+    }
   }
 
-  return formatRedilutionIntervals(config.intervals)
+  if (modes.includes('ev')) {
+    if (medication.redilutionEVDireto && !medication.redilutionEVDireto.disabled) {
+      configs.push({ label: 'EV Direto', config: medication.redilutionEVDireto })
+    }
+    if (medication.redilutionEVIntermitente && !medication.redilutionEVIntermitente.disabled) {
+      configs.push({ label: 'EV Intermitente', config: medication.redilutionEVIntermitente })
+    }
+  }
+
+  if (modes.includes('age')) {
+    if (medication.redilutionPediatria && !medication.redilutionPediatria.disabled) {
+      configs.push({ label: 'Pediatria', config: medication.redilutionPediatria })
+    }
+    if (medication.redilutionAdulto && !medication.redilutionAdulto.disabled) {
+      configs.push({ label: 'Adulto', config: medication.redilutionAdulto })
+    }
+  }
+
+  if (modes.includes('access')) {
+    const periferico = medication.redilutionAcessoPeriferico || medication.redilutionPeriferico
+    if (periferico && !periferico.disabled) {
+      configs.push({ label: 'Acesso Periférico', config: periferico })
+    }
+    const central = medication.redilutionAcessoCentral || medication.redilutionCentral
+    if (central && !central.disabled) {
+      configs.push({ label: 'Acesso Central', config: central })
+    }
+  }
+
+  return configs
 }
 
-const redilutionDisplayLines = computed(() => {
-  if (selectedMedication.value?.redilutionNotApplicable) {
-    const custom = selectedMedication.value?.redilutionCustomText?.trim()
-    if (custom) {
-      return parseMultilineInput(custom)
-    }
-    const legacyDiluition = toStringArray(selectedMedication.value?.diluition ?? [])
-    if (legacyDiluition.length > 0) {
-      return legacyDiluition
-    }
-    return ['Não necessita rediluição.']
+const redilutionConfigDisplayLines = (config, legacyDiluition = []) => {
+  if (!config || config.disabled) {
+    return []
   }
 
-  const intervals = selectedMedication.value?.redilutionIntervals ?? []
-  const formatted = formatRedilutionIntervals(intervals)
-
-  if (formatted.length > 0) {
-    return formatted
+  if (config.notApplicable) {
+    const custom = config.customText?.trim()
+    return custom ? parseMultilineInput(custom) : legacyDiluition?.length > 0 ? legacyDiluition : ['Não necessita rediluição.']
   }
 
-  return toStringArray(selectedMedication.value?.diluition ?? [])
-})
+  return formatRedilutionIntervals(config.intervals || [])
+}
 
 const redilutionDisplayGroups = computed(() => {
   const medication = selectedMedication.value
-
   if (!medication) {
     return []
   }
 
-  if (medication.redilutionMode === 'ev') {
-    return [
-      { label: 'EV Direto', lines: redilutionConfigDisplayLines(medication.redilutionEVDireto) },
-      { label: 'EV Intermitente', lines: redilutionConfigDisplayLines(medication.redilutionEVIntermitente) }
-    ]
+  const activeConfigs = getActiveRedilutionConfigurations(medication)
+  if (activeConfigs.length === 0) {
+    return [{ label: '', lines: ['Não necessita rediluição.'], observations: '' }]
   }
 
-  if (medication.redilutionMode === 'age') {
-    return [
-      { label: 'Pediatria', lines: redilutionConfigDisplayLines(medication.redilutionPediatria) },
-      { label: 'Adulto', lines: redilutionConfigDisplayLines(medication.redilutionAdulto) }
-    ]
-  }
-
-  return [{ label: '', lines: redilutionDisplayLines.value }]
+  return activeConfigs.map(({ label, config }) => ({
+    label: activeConfigs.length === 1 && label === 'Padrão' ? '' : label,
+    lines: redilutionConfigDisplayLines(config, medication.diluition),
+    observations: (config.hasObservations || config.observations) ? String(config.observations ?? '').trim() : ''
+  }))
 })
 
 const filteredMedications = computed(() => {
@@ -618,14 +734,17 @@ const resetNewMedication = () => {
   newMedication.description = ''
   newMedication.classes = ''
   newMedication.reconstituition = ''
-  newMedication.redilutionNotApplicable = false
-  newMedication.redilutionCustomText = ''
-  newMedication.redilutionIntervals = [createRedilutionInterval()]
-  newMedication.redilutionMode = 'single'
+  newMedication.redilutionModes = ['single']
+  Object.assign(newMedication.redilutionStandard, createRedilutionConfig())
   Object.assign(newMedication.redilutionEVDireto, createRedilutionConfig())
   Object.assign(newMedication.redilutionEVIntermitente, createRedilutionConfig())
   Object.assign(newMedication.redilutionPediatria, createRedilutionConfig())
   Object.assign(newMedication.redilutionAdulto, createRedilutionConfig())
+  Object.assign(newMedication.redilutionAcessoPeriferico, createRedilutionConfig())
+  Object.assign(newMedication.redilutionAcessoCentral, createRedilutionConfig())
+  newMedication.redilutionNotApplicable = false
+  newMedication.redilutionCustomText = ''
+  newMedication.redilutionIntervals = [createRedilutionInterval()]
   newMedication.infusionTime = ''
   lastAutoVariation.value = ''
   variationAutoEnabled.value = true
@@ -639,24 +758,18 @@ const populateMedicationForm = (medication) => {
   newMedication.description = medication.description
   newMedication.classes = medication.classes.join(', ')
   newMedication.reconstituition = medication.reconstituition.join('\n')
-  newMedication.redilutionNotApplicable = Boolean(medication.redilutionNotApplicable)
-  newMedication.redilutionCustomText = String(
-    medication.redilutionCustomText ?? (Array.isArray(medication.diluition) ? medication.diluition.join('\n') : '')
-  )
-  newMedication.redilutionIntervals =
-    medication.redilutionIntervals?.length > 0
-      ? medication.redilutionIntervals.map((interval) => ({
-          operator: interval.operator,
-          amountMg: String(interval.amountMg),
-          volumeMl: String(interval.volumeMl)
-        }))
-      : [createRedilutionInterval()]
-  newMedication.redilutionMode = medication.redilutionMode
+
+  newMedication.redilutionModes = Array.isArray(medication.redilutionModes) && medication.redilutionModes.length > 0
+    ? [...medication.redilutionModes]
+    : [medication.redilutionMode || 'single']
 
   const populateRedilutionConfig = (target, source) => {
-    target.notApplicable = Boolean(source.notApplicable)
-    target.customText = String(source.customText ?? '')
-    target.intervals = source.intervals.length > 0
+    target.disabled = Boolean(source?.disabled)
+    target.notApplicable = Boolean(source?.notApplicable)
+    target.customText = String(source?.customText ?? '')
+    target.hasObservations = Boolean(source?.hasObservations || source?.observations)
+    target.observations = String(source?.observations ?? '')
+    target.intervals = source?.intervals?.length > 0
       ? source.intervals.map((interval) => ({
           operator: interval.operator,
           amountMg: String(interval.amountMg),
@@ -665,10 +778,22 @@ const populateMedicationForm = (medication) => {
       : [createRedilutionInterval()]
   }
 
+  populateRedilutionConfig(newMedication.redilutionStandard, medication.redilutionStandard || {
+    notApplicable: medication.redilutionNotApplicable,
+    customText: medication.redilutionCustomText,
+    intervals: medication.redilutionIntervals
+  })
   populateRedilutionConfig(newMedication.redilutionEVDireto, medication.redilutionEVDireto)
   populateRedilutionConfig(newMedication.redilutionEVIntermitente, medication.redilutionEVIntermitente)
   populateRedilutionConfig(newMedication.redilutionPediatria, medication.redilutionPediatria)
   populateRedilutionConfig(newMedication.redilutionAdulto, medication.redilutionAdulto)
+  populateRedilutionConfig(newMedication.redilutionAcessoPeriferico, medication.redilutionAcessoPeriferico || medication.redilutionPeriferico)
+  populateRedilutionConfig(newMedication.redilutionAcessoCentral, medication.redilutionAcessoCentral || medication.redilutionCentral)
+
+  newMedication.redilutionNotApplicable = Boolean(newMedication.redilutionStandard.notApplicable)
+  newMedication.redilutionCustomText = String(newMedication.redilutionStandard.customText ?? '')
+  newMedication.redilutionIntervals = [...newMedication.redilutionStandard.intervals]
+
   newMedication.infusionTime = medication.infusionTime.join('\n')
   syncVariationAutoState()
 }
@@ -860,28 +985,41 @@ const removeRedilutionInterval = (config, index) => {
   config.intervals.splice(index, 1)
 }
 
-const asRedilutionConfig = (notApplicable, customText, intervals) => ({
-  notApplicable: Boolean(notApplicable),
-  customText: String(customText ?? '').trim(),
-  intervals: Boolean(notApplicable) ? [] : parseRedilutionIntervals(intervals)
+const asRedilutionConfig = (config) => ({
+  disabled: Boolean(config?.disabled),
+  notApplicable: Boolean(config?.notApplicable),
+  customText: String(config?.customText ?? '').trim(),
+  hasObservations: Boolean(config?.hasObservations || config?.observations),
+  observations: String(config?.observations ?? '').trim(),
+  intervals: Boolean(config?.notApplicable) || Boolean(config?.disabled)
+    ? []
+    : parseRedilutionIntervals(config?.intervals || [])
 })
 
 const hasValidRedilutionConfig = (config) =>
-  config.notApplicable || config.intervals.length > 0
+  config.disabled || config.notApplicable || config.intervals.length > 0
 
 const getRedilutionResult = (doseMg, config) => {
+  const observations = (config.hasObservations || config.observations) ? String(config.observations ?? '').trim() : ''
+
   if (config.notApplicable) {
-    return { notApplicable: true, customText: config.customText, value: '', intervalLabel: '' }
+    return {
+      notApplicable: true,
+      customText: config.customText,
+      value: '',
+      intervalLabel: '',
+      observations
+    }
   }
 
   if (config.intervals.length === 0) {
-    return { error: 'Nenhum intervalo de rediluição cadastrado.' }
+    return { error: 'Nenhum intervalo de rediluição cadastrado.', observations }
   }
 
   const resolvedInterval = resolveRedilutionInterval(doseMg, config.intervals)
 
   if (!resolvedInterval) {
-    return { error: 'Nenhum intervalo de rediluição compatível com a dose informada.' }
+    return { error: 'Nenhum intervalo de rediluição compatível com a dose informada.', observations }
   }
 
   const diluentNeeded = (doseMg * resolvedInterval.interval.volumeMl) / resolvedInterval.interval.amountMg
@@ -889,7 +1027,8 @@ const getRedilutionResult = (doseMg, config) => {
     notApplicable: false,
     customText: '',
     value: `${diluentNeeded.toFixed(2)} mL`,
-    intervalLabel: resolvedInterval.label
+    intervalLabel: resolvedInterval.label,
+    observations
   }
 }
 
@@ -951,35 +1090,32 @@ const calculateDose = () => {
   const volumeNeeded = (prescribedValue * ampouleVolume) / ampouleAmount
   resultMl.value = `${volumeNeeded.toFixed(2)} mL`
 
-  const configurations = medication.redilutionMode === 'ev'
-    ? [
-        { label: 'EV Direto', config: medication.redilutionEVDireto },
-        { label: 'EV Intermitente', config: medication.redilutionEVIntermitente }
-      ]
-    : medication.redilutionMode === 'age'
-      ? [
-          { label: 'Pediatria', config: medication.redilutionPediatria },
-          { label: 'Adulto', config: medication.redilutionAdulto }
-        ]
-      : [
-          {
-            label: '',
-            config: {
-              notApplicable: medication.redilutionNotApplicable,
-              customText: medication.redilutionCustomText,
-              intervals: medication.redilutionIntervals
-            }
-          }
-        ]
+  const activeConfigurations = getActiveRedilutionConfigurations(medication)
 
-  const results = configurations.map(({ label, config }) => ({
+  if (activeConfigurations.length === 0) {
+    redilutionResults.value = [{
+      label: '',
+      notApplicable: true,
+      customText: 'Não necessita rediluição.',
+      value: '',
+      intervalLabel: '',
+      observations: ''
+    }]
+    redilutionResultMl.value = ''
+    redilutionIntervalLabel.value = ''
+    calcError.value = ''
+    return
+  }
+
+  const results = activeConfigurations.map(({ label, config }) => ({
     label,
     ...getRedilutionResult(prescribedValue, config)
   }))
+
   const failedResult = results.find((result) => result.error)
 
   if (failedResult) {
-    calcError.value = failedResult.label
+    calcError.value = failedResult.label && failedResult.label !== 'Padrão'
       ? `${failedResult.label}: ${failedResult.error}`
       : failedResult.error
     redilutionResultMl.value = ''
@@ -1010,32 +1146,14 @@ const addMedication = async () => {
   const amountMg = Number(newMedication.amountMg)
   const classes = parseListInput(newMedication.classes)
   const reconstituition = parseMultilineInput(newMedication.reconstituition)
-  const redilutionMode = newMedication.redilutionMode
-  const redilutionNotApplicable = Boolean(newMedication.redilutionNotApplicable)
-  const redilutionCustomText = String(newMedication.redilutionCustomText ?? '').trim()
-  const redilutionIntervals = redilutionNotApplicable
-    ? []
-    : parseRedilutionIntervals(newMedication.redilutionIntervals)
-  const redilutionEVDireto = asRedilutionConfig(
-    newMedication.redilutionEVDireto.notApplicable,
-    newMedication.redilutionEVDireto.customText,
-    newMedication.redilutionEVDireto.intervals
-  )
-  const redilutionEVIntermitente = asRedilutionConfig(
-    newMedication.redilutionEVIntermitente.notApplicable,
-    newMedication.redilutionEVIntermitente.customText,
-    newMedication.redilutionEVIntermitente.intervals
-  )
-  const redilutionPediatria = asRedilutionConfig(
-    newMedication.redilutionPediatria.notApplicable,
-    newMedication.redilutionPediatria.customText,
-    newMedication.redilutionPediatria.intervals
-  )
-  const redilutionAdulto = asRedilutionConfig(
-    newMedication.redilutionAdulto.notApplicable,
-    newMedication.redilutionAdulto.customText,
-    newMedication.redilutionAdulto.intervals
-  )
+  const modes = newMedication.redilutionModes || []
+  const redilutionStandard = asRedilutionConfig(newMedication.redilutionStandard)
+  const redilutionEVDireto = asRedilutionConfig(newMedication.redilutionEVDireto)
+  const redilutionEVIntermitente = asRedilutionConfig(newMedication.redilutionEVIntermitente)
+  const redilutionPediatria = asRedilutionConfig(newMedication.redilutionPediatria)
+  const redilutionAdulto = asRedilutionConfig(newMedication.redilutionAdulto)
+  const redilutionAcessoPeriferico = asRedilutionConfig(newMedication.redilutionAcessoPeriferico)
+  const redilutionAcessoCentral = asRedilutionConfig(newMedication.redilutionAcessoCentral)
   const infusionTime = parseMultilineInput(newMedication.infusionTime)
 
   if (!name || !variation) {
@@ -1058,14 +1176,38 @@ const addMedication = async () => {
     return
   }
 
-  const invalidSingle = redilutionMode === 'single' && !redilutionNotApplicable && redilutionIntervals.length === 0
-  const invalidEv = redilutionMode === 'ev' && (!hasValidRedilutionConfig(redilutionEVDireto) || !hasValidRedilutionConfig(redilutionEVIntermitente))
-  const invalidAge = redilutionMode === 'age' && (!hasValidRedilutionConfig(redilutionPediatria) || !hasValidRedilutionConfig(redilutionAdulto))
+  if (modes.length === 0) {
+    adminError.value = 'Selecione ao menos um modo de rediluição.'
+    return
+  }
 
-  if (invalidSingle || invalidEv || invalidAge) {
-    adminError.value = redilutionMode === 'single'
-      ? 'Informe ao menos um intervalo de rediluição válido ou marque "Não se aplica / Outras regras".'
-      : 'Configure ao menos um intervalo válido ou uma regra alternativa para cada modalidade de rediluição.'
+  let hasInvalidConfig = false
+
+  if (modes.includes('single') && !hasValidRedilutionConfig(redilutionStandard)) {
+    hasInvalidConfig = true
+  }
+  if (modes.includes('ev') && (!hasValidRedilutionConfig(redilutionEVDireto) || !hasValidRedilutionConfig(redilutionEVIntermitente))) {
+    hasInvalidConfig = true
+  }
+  if (modes.includes('age') && (!hasValidRedilutionConfig(redilutionPediatria) || !hasValidRedilutionConfig(redilutionAdulto))) {
+    hasInvalidConfig = true
+  }
+  if (modes.includes('access') && (!hasValidRedilutionConfig(redilutionAcessoPeriferico) || !hasValidRedilutionConfig(redilutionAcessoCentral))) {
+    hasInvalidConfig = true
+  }
+
+  const allDisabledInSingle = modes.includes('single') && redilutionStandard.disabled
+  const allDisabledInEv = modes.includes('ev') && redilutionEVDireto.disabled && redilutionEVIntermitente.disabled
+  const allDisabledInAge = modes.includes('age') && redilutionPediatria.disabled && redilutionAdulto.disabled
+  const allDisabledInAccess = modes.includes('access') && redilutionAcessoPeriferico.disabled && redilutionAcessoCentral.disabled
+
+  if (allDisabledInSingle || allDisabledInEv || allDisabledInAge || allDisabledInAccess) {
+    adminError.value = 'Ao menos uma opção de rediluição deve permanecer ativa dentro de cada modo selecionado.'
+    return
+  }
+
+  if (hasInvalidConfig) {
+    adminError.value = 'Configure ao menos um intervalo válido ou marque "Não se aplica" para cada tipo de rediluição ativo.'
     return
   }
 
@@ -1077,14 +1219,18 @@ const addMedication = async () => {
     description,
     classes,
     reconstituition,
-    redilutionMode,
-    redilutionNotApplicable,
-    redilutionCustomText,
-    redilutionIntervals,
+    redilutionModes: modes,
+    redilutionMode: modes[0] || 'single',
+    redilutionStandard,
     redilutionEVDireto,
     redilutionEVIntermitente,
     redilutionPediatria,
     redilutionAdulto,
+    redilutionAcessoPeriferico,
+    redilutionAcessoCentral,
+    redilutionNotApplicable: redilutionStandard.notApplicable,
+    redilutionCustomText: redilutionStandard.customText,
+    redilutionIntervals: redilutionStandard.intervals,
     infusionTime
   }
 
@@ -1273,7 +1419,7 @@ loadMedications()
             aria-label="Calculadora"
             @click="activeView = 'calculator'"
           >
-            <span class="tab-icon" aria-hidden="true">🧮</span>
+            <span class="tab-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-calculator-icon lucide-calculator"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg></span>
             <span class="tab-text">Calculadora</span>
           </button>
 
@@ -1285,7 +1431,7 @@ loadMedications()
             aria-label="Administração"
             @click="activeView = 'admin'"
           >
-            <span class="tab-icon" aria-hidden="true">⚙️</span>
+            <span class="tab-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings-icon lucide-settings"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></span>
             <span class="tab-text">Administração</span>
           </button>
 
@@ -1295,7 +1441,7 @@ loadMedications()
             aria-label="Sair"
             @click="handleLogout"
           >
-            <span class="tab-icon" aria-hidden="true">➜]</span>
+            <span class="tab-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out-icon lucide-log-out"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg></span>
             <span class="tab-text">Sair</span>
           </button>
         </div>
@@ -1360,7 +1506,6 @@ loadMedications()
           </button>
           <p v-else class="install-hint">
             Se o botão não aparecer, siga os passos abaixo.
-            
           </p>
         </div>
 
@@ -1380,12 +1525,6 @@ loadMedications()
           </p>
         </div>
       </article>
-
-      <footer class="login-footer">
-        <button type="button" class="about-link" @click="openAbout">
-          Sobre o app
-        </button>
-      </footer>
     </section>
 
     <section v-else class="dashboard-shell">
@@ -1508,6 +1647,9 @@ loadMedications()
                   <li v-for="item in group.lines" :key="item">{{ item }}</li>
                 </ul>
                 <p v-else class="empty-text">Não informado.</p>
+                <p v-if="group.observations" class="redilution-detail-obs">
+                  <strong>Obs:</strong> {{ group.observations }}
+                </p>
               </div>
 
               <p class="subtitle">Tempo de infusão</p>
@@ -1565,39 +1707,46 @@ loadMedications()
                   />
                 </label>
 
-                <template v-if="selectedMedication.redilutionMode === 'single'">
-                  <label
-                    v-if="!selectedMedication.redilutionNotApplicable"
-                    class="field-group full-row"
-                  >
-                    <span>Rediluir em (mL)</span>
-                    <input
-                      class="input result"
-                      :value="redilutionResultMl"
-                      readonly
-                      placeholder="Resultado da rediluição"
-                    />
-                  </label>
-
-                  <div v-else class="field-group full-row not-applicable-container">
-                    <span>Rediluição</span>
-                    <div class="not-applicable-box">
-                      <div class="not-applicable-badge">Não necessita rediluição</div>
-                      <div v-if="selectedMedication.redilutionCustomText" class="not-applicable-text">
-                        {{ selectedMedication.redilutionCustomText }}
+                <template v-if="redilutionResults.length === 1">
+                  <div class="field-group full-row single-redilution-result">
+                    <h4 v-if="redilutionResults[0].label && redilutionResults[0].label !== 'Padrão'">
+                      {{ redilutionResults[0].label }}
+                    </h4>
+                    <template v-if="redilutionResults[0].notApplicable">
+                      <div class="not-applicable-container">
+                        <span>Rediluição</span>
+                        <div class="not-applicable-box">
+                          <div class="not-applicable-badge">Não necessita rediluição</div>
+                          <div v-if="redilutionResults[0].customText" class="not-applicable-text">
+                            {{ redilutionResults[0].customText }}
+                          </div>
+                          <div v-else-if="selectedMedication.diluition?.length > 0" class="not-applicable-text">
+                            <p v-for="item in selectedMedication.diluition" :key="item">{{ item }}</p>
+                          </div>
+                        </div>
                       </div>
-                      <div v-else-if="selectedMedication.diluition?.length > 0" class="not-applicable-text">
-                        <p v-for="item in selectedMedication.diluition" :key="item">{{ item }}</p>
-                      </div>
-                    </div>
+                    </template>
+                    <template v-else>
+                      <label class="field-group">
+                        <span>Rediluir em (mL)</span>
+                        <input
+                          class="input result"
+                          :value="redilutionResults[0].value"
+                          readonly
+                          placeholder="Resultado da rediluição"
+                        />
+                      </label>
+                      <p v-if="redilutionResults[0].intervalLabel" class="hint">
+                        Intervalo aplicado: {{ redilutionResults[0].intervalLabel }}
+                      </p>
+                    </template>
+                    <p v-if="redilutionResults[0].observations" class="redilution-obs-badge">
+                      <strong>Obs:</strong> {{ redilutionResults[0].observations }}
+                    </p>
                   </div>
-
-                  <p v-if="!selectedMedication.redilutionNotApplicable && redilutionIntervalLabel" class="hint full-row">
-                    Intervalo aplicado: {{ redilutionIntervalLabel }}
-                  </p>
                 </template>
 
-                <div v-else class="dual-redilution-results full-row">
+                <div v-else-if="redilutionResults.length > 1" class="dual-redilution-results full-row">
                   <article
                     v-for="result in redilutionResults"
                     :key="result.label"
@@ -1613,6 +1762,9 @@ loadMedications()
                       <strong class="dual-result-value">{{ result.value || '—' }}</strong>
                       <p v-if="result.intervalLabel" class="hint">Intervalo aplicado: {{ result.intervalLabel }}</p>
                     </template>
+                    <p v-if="result.observations" class="redilution-obs-badge">
+                      <strong>Obs:</strong> {{ result.observations }}
+                    </p>
                   </article>
                 </div>
               </div>
@@ -1714,112 +1866,143 @@ loadMedications()
 
             <fieldset class="field-group redilution-mode-fieldset">
               <legend>Modo de Rediluição</legend>
-              <p class="hint">Escolha uma única forma de configurar a rediluição deste medicamento.</p>
-              <div class="redilution-mode-options">
-                <label class="radio-inline-label">
-                  <input v-model="newMedication.redilutionMode" type="radio" value="single" />
-                  <span>Rediluição padrão</span>
-                </label>
-                <label class="radio-inline-label">
-                  <input v-model="newMedication.redilutionMode" type="radio" value="ev" />
-                  <span>Por tipo EV (direto/intermitente)</span>
-                </label>
-                <label class="radio-inline-label">
-                  <input v-model="newMedication.redilutionMode" type="radio" value="age" />
-                  <span>Por faixa etária (pediatria/adulto)</span>
+              <p class="hint">Selecione uma ou mais formas de configurar a rediluição deste medicamento.</p>
+              <div class="redilution-mode-grid">
+                <label
+                  v-for="cat in redilutionModeCategories"
+                  :key="cat.id"
+                  class="checkbox-card-label"
+                >
+                  <input
+                    v-model="newMedication.redilutionModes"
+                    type="checkbox"
+                    :value="cat.id"
+                  />
+                  <span>{{ cat.label }}</span>
                 </label>
               </div>
             </fieldset>
 
-            <template v-if="newMedication.redilutionMode === 'single'">
-              <section class="field-group redilution-config-section">
+            <div class="dual-redilution-configs">
+              <section
+                v-for="item in redilutionConfigSections"
+                :key="item.key"
+                class="redilution-config-section"
+                :class="{ 'is-disabled': newMedication[item.key].disabled }"
+              >
                 <div class="field-head-row">
-                  <h3>Rediluição padrão (intervalos)</h3>
-                  <label class="checkbox-inline-label">
-                    <input v-model="newMedication.redilutionNotApplicable" type="checkbox" />
-                    <span>Não se aplica / Outras regras</span>
-                  </label>
-                </div>
-
-                <div v-if="!newMedication.redilutionNotApplicable" class="redilution-intervals">
-                  <button type="button" class="btn-secondary compact" @click="newMedication.redilutionIntervals.push(createRedilutionInterval())">
-                    Adicionar intervalo
-                  </button>
-                  <div v-for="(interval, index) in newMedication.redilutionIntervals" :key="`single-interval-${index}`" class="redilution-row">
-                    <select v-model="interval.operator" class="input">
-                      <option value="upTo">até</option>
-                      <option value="above">acima de</option>
-                    </select>
-                    <div class="input-unit-wrap">
-                      <input v-model="interval.amountMg" class="input input-unit" type="number" min="0" step="0.01" placeholder="0" />
-                      <span class="input-unit-label">mg</span>
-                    </div>
-                    <div class="input-unit-wrap">
-                      <input v-model="interval.volumeMl" class="input input-unit" type="number" min="0" step="0.01" placeholder="0" />
-                      <span class="input-unit-label">mL</span>
-                    </div>
-                    <button type="button" class="btn-danger compact" @click="removeRedilutionInterval(newMedication, index)">
-                      Remover
-                    </button>
-                  </div>
-                </div>
-                <div v-else class="redilution-custom-wrap">
-                  <textarea v-model="newMedication.redilutionCustomText" class="input textarea" placeholder="Descreva os detalhes ou regras de rediluição" rows="3"></textarea>
-                </div>
-              </section>
-            </template>
-
-            <template v-else>
-              <div class="dual-redilution-configs">
-                <section
-                  v-for="item in (newMedication.redilutionMode === 'ev'
-                    ? [
-                        { key: 'redilutionEVDireto', label: 'EV Direto' },
-                        { key: 'redilutionEVIntermitente', label: 'EV Intermitente' }
-                      ]
-                    : [
-                        { key: 'redilutionPediatria', label: 'Pediatria' },
-                        { key: 'redilutionAdulto', label: 'Adulto' }
-                      ])"
-                  :key="item.key"
-                  class="redilution-config-section"
-                >
-                  <div class="field-head-row">
+                  <div class="head-title-wrap">
                     <h3>{{ item.label }}</h3>
-                    <label class="checkbox-inline-label">
-                      <input v-model="newMedication[item.key].notApplicable" type="checkbox" />
-                      <span>Não se aplica / Outras regras</span>
-                    </label>
+                    <span v-if="newMedication[item.key].disabled" class="badge badge-warning">Desativado</span>
                   </div>
 
+                  <div class="head-actions">
+                    <template v-if="!newMedication[item.key].disabled">
+                      <label class="checkbox-inline-label">
+                        <input v-model="newMedication[item.key].notApplicable" type="checkbox" />
+                        <span>Não se aplica / Outras regras</span>
+                      </label>
+                      <button
+                        type="button"
+                        class="btn-danger"
+                        title="Desativar este tipo de diluição (não considerar na calculadora)"
+                        aria-label="Desativar este tipo"
+                        @click="newMedication[item.key].disabled = true"
+                      >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" style="margin: 4px 0px 0px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash-icon lucide-trash"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        type="button"
+                        class="btn-secondary compact"
+                        @click="newMedication[item.key].disabled = false"
+                      >
+                        ↺ Reativar {{ item.label }}
+                      </button>
+                    </template>
+                  </div>
+                </div>
+
+                <div v-if="!newMedication[item.key].disabled">
                   <div v-if="!newMedication[item.key].notApplicable" class="redilution-intervals">
-                    <button type="button" class="btn-secondary compact" @click="addRedilutionInterval(newMedication[item.key])">
+                    <button
+                      type="button"
+                      class="btn-secondary compact"
+                      @click="addRedilutionInterval(newMedication[item.key])"
+                    >
                       Adicionar intervalo
                     </button>
-                    <div v-for="(interval, index) in newMedication[item.key].intervals" :key="`${item.key}-interval-${index}`" class="redilution-row">
+                    <div
+                      v-for="(interval, index) in newMedication[item.key].intervals"
+                      :key="`${item.key}-interval-${index}`"
+                      class="redilution-row"
+                    >
                       <select v-model="interval.operator" class="input">
                         <option value="upTo">até</option>
                         <option value="above">acima de</option>
                       </select>
                       <div class="input-unit-wrap">
-                        <input v-model="interval.amountMg" class="input input-unit" type="number" min="0" step="0.01" placeholder="0" />
+                        <input
+                          v-model="interval.amountMg"
+                          class="input input-unit"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0"
+                        />
                         <span class="input-unit-label">mg</span>
                       </div>
                       <div class="input-unit-wrap">
-                        <input v-model="interval.volumeMl" class="input input-unit" type="number" min="0" step="0.01" placeholder="0" />
+                        <input
+                          v-model="interval.volumeMl"
+                          class="input input-unit"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0"
+                        />
                         <span class="input-unit-label">mL</span>
                       </div>
-                      <button type="button" class="btn-danger compact" @click="removeRedilutionInterval(newMedication[item.key], index)">
+                      <button
+                        type="button"
+                        class="btn-danger compact"
+                        @click="removeRedilutionInterval(newMedication[item.key], index)"
+                      >
                         Remover
                       </button>
                     </div>
                   </div>
                   <div v-else class="redilution-custom-wrap">
-                    <textarea v-model="newMedication[item.key].customText" class="input textarea" placeholder="Descreva os detalhes ou regras de rediluição" rows="3"></textarea>
+                    <textarea
+                      v-model="newMedication[item.key].customText"
+                      class="input textarea"
+                      placeholder="Descreva os detalhes ou regras de rediluição"
+                      rows="3"
+                    ></textarea>
                   </div>
-                </section>
-              </div>
-            </template>
+
+                  <!-- Checkbox de observações abaixo dos intervalos -->
+                  <div class="redilution-observations-wrap">
+                    <label class="checkbox-inline-label obs-toggle">
+                      <input v-model="newMedication[item.key].hasObservations" type="checkbox" />
+                      <span>Adicionar observações para {{ item.label }}</span>
+                    </label>
+                    <div v-if="newMedication[item.key].hasObservations" class="obs-input-wrap">
+                      <textarea
+                        v-model="newMedication[item.key].observations"
+                        class="input textarea obs-textarea"
+                        placeholder="Observações clínicas adicionais (ex.: Infundir em no mínimo 60 min; risco de flebite...)"
+                        rows="2"
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="disabled-placeholder">
+                  <p class="muted">Este tipo de diluição está desativado e não será considerado na calculadora.</p>
+                </div>
+              </section>
+            </div>
 
             <label class="field-group">
               <span>Tempo de infusão (1 item por linha)</span>
@@ -1926,6 +2109,22 @@ loadMedications()
         </article>
       </section>
     </section>
+
+    <footer class="app-footer">
+      <button type="button" class="footer-link" @click="openAbout">
+        Sobre o app
+      </button>
+      <span class="footer-sep">|</span>
+      <button
+        type="button"
+        class="footer-link"
+        :disabled="isReloading"
+        title="Limpar cache do navegador e recarregar a página"
+        @click="handleHardReload"
+      >
+        {{ isReloading ? 'Recarregando...' : 'Recarregar página' }}
+      </button>
+    </footer>
 
     <div
       v-if="isAboutOpen"

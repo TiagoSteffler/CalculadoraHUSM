@@ -165,8 +165,23 @@ p {
 
 .install-actions {
   margin-top: 14px;
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
+}
+
+.install-actions .btn-primary,
+.install-actions .btn-secondary {
+  flex: 1 1 200px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.reload-app-btn {
+  font-weight: 700;
 }
 
 .install-hint {
@@ -186,26 +201,42 @@ p {
   color: var(--brand-strong);
 }
 
-.login-footer {
-  width: min(620px, 100%);
+.app-footer {
+  width: 100%;
   display: flex;
   justify-content: center;
-  margin-top: 6px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 12px 0 20px;
+  font-size: 0.82rem;
+  color: var(--text-soft);
 }
 
-.about-link {
+.footer-link {
   border: 0;
   background: transparent;
-  color: var(--brand-strong);
-  font-weight: 800;
-  font-size: 0.95rem;
-  text-decoration: underline;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+  line-height: 1.2;
 }
 
-.about-link:hover {
-  color: var(--brand);
+.footer-link:hover {
+  color: var(--brand-strong);
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.footer-sep {
+  color: #94a3b8;
+  user-select: none;
+  font-size: 0.78rem;
 }
 
 .modal-overlay {
@@ -796,6 +827,14 @@ p {
   border-radius: 16px;
   background: #f7fcfa;
   padding: 14px;
+  transition: all 0.2s ease;
+}
+
+.redilution-config-section.is-disabled {
+  background: #f9fbfb;
+  border-color: #d1deda;
+  border-style: dashed;
+  opacity: 0.8;
 }
 
 .redilution-mode-fieldset legend {
@@ -807,39 +846,122 @@ p {
 
 .redilution-mode-fieldset .hint {
   margin-top: 0;
+  margin-bottom: 10px;
 }
 
-.redilution-mode-options {
+.redilution-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.checkbox-card-label {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #c9e1da;
+  background: #ffffff;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-soft);
+  transition: all 0.2s ease;
+  user-select: none;
 }
 
-.radio-inline-label {
+.checkbox-card-label:hover {
+  border-color: var(--primary, #0f766e);
+  background: #f0fdf9;
+}
+
+.checkbox-card-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--primary, #0f766e);
+}
+
+.head-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-icon-danger {
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  color: var(--text-soft);
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
+  justify-content: center;
 }
 
-.radio-inline-label input[type="radio"] {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--brand);
-  cursor: pointer;
+.btn-icon-danger:hover {
+  background: #fee2e2;
+  border-color: #ef4444;
+  transform: scale(1.05);
+}
+
+.disabled-placeholder {
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.redilution-observations-wrap {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #cfe5df;
+  display: grid;
+  gap: 8px;
+}
+
+.obs-toggle {
+  font-size: 0.88rem;
+  color: #245e5a;
+  font-weight: 700;
+}
+
+.obs-textarea {
+  min-height: 60px;
+  font-size: 0.92rem;
+  background: #fafffe;
+}
+
+.redilution-detail-obs,
+.redilution-obs-badge {
+  margin-top: 6px;
+  font-size: 0.86rem;
+  color: #0f766e;
+  background: #e6f7f4;
+  border-left: 3px solid #0f766e;
+  padding: 6px 10px;
+  border-radius: 0 8px 8px 0;
+  line-height: 1.4;
 }
 
 .dual-redilution-configs {
   margin: 0px;
+  display: grid;
+  gap: 12px;
 }
 
 .redilution-config-section {
   display: grid;
-  gap: 12px;
-  margin: 10px 0px;
+  gap: 6px;
 }
 
 .redilution-config-section h3 {
@@ -847,9 +969,14 @@ p {
   font-size: 1.15rem;
 }
 
+.single-redilution-result {
+  display: grid;
+  gap: 8px;
+}
+
 .dual-redilution-results {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
